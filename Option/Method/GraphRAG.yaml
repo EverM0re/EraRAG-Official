@@ -1,0 +1,92 @@
+################################# Working settings  #################################
+# Basic Config
+use_entities_vdb: True
+use_relations_vdb: False  # Only set True for LightRAG
+llm_model_max_token_size: 32768
+use_entity_link_chunk: False  # Only set True for HippoRAG and FastGraphRAG
+enable_graph_augmentation: False
+
+# Data
+
+index_name: kg_graph
+
+vdb_type: vector  # vector/colbert
+# Chunk Config 
+chunk:
+  chunk_token_size: 1200
+  chunk_overlap_token_size: 100
+  token_model: gpt-3.5-turbo
+  chunk_method: chunking_by_token_size
+
+# Graph Config 
+graph:
+  # enable LightRAG
+    enable_edge_keywords: False
+    graph_type: rkg_graph # rkg_graph/er_graph/tree_graph/passage_graph
+    force: True
+    # Building graph
+    extract_two_step: True
+    max_gleaning: 1
+    enable_entity_description: True
+    enable_entity_type: False
+    enable_edge_description: True
+    enable_edge_name: True
+    prior_prob:  0.8
+    
+    # Graph clustering
+    use_community: True
+    graph_cluster_algorithm: leiden
+    max_graph_cluster_size: 10
+    graph_cluster_seed: 0xDEADBEEF
+    summary_max_tokens: 500
+
+
+    random_seed: 224
+    enforce_sub_communities: False
+
+    
+
+
+# Retrieval Config 
+retriever:
+    query_type: basic
+    enable_local: False
+    use_entity_similarity_for_ppr: True
+    top_k_entity_for_ppr: 8
+    node_specificity: True
+    damping: 0.1
+    top_k: 5
+    max_token_for_local_context: 4800  # 12000 * 0.4
+    
+query: 
+    query_type: qa
+    only_need_context: False
+    enable_hybrid_query: True
+    augmentation_ppr: True
+    response_type: Multiple Paragraphs
+    level: 2
+    community_information: True
+    retrieve_top_k: 20
+    # naive search
+    naive_max_token_for_text_unit: 12000
+    # local search
+    local_max_token_for_text_unit: 4000  # 12000 * 0.33
+    max_token_for_text_unit: 4000
+    
+    entities_max_tokens: 2000
+    relationships_max_tokens: 2000
+
+
+    local_max_token_for_community_report: 3200  # 12000 * 0.27
+    local_community_single_one: False
+    # global search
+    use_global_query: True
+    global_min_community_rating:  0
+    global_max_consider_community: 512
+    global_max_token_for_community_report: 16384
+    max_token_for_global_context: 4000
+    global_special_community_map_llm_kwargs: {"response_format": {"type": "json_object"}}
+    # For IR-COT
+    max_ir_steps: 2
+    
+ 

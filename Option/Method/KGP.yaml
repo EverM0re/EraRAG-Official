@@ -1,0 +1,41 @@
+################################# Working settings  #################################
+# Data
+index_name: passage_of_graph
+
+vdb_type: vector  # vector/colbert
+
+
+# Basic Config
+use_entities_vdb: True
+use_relations_vdb: False  # Only set True for LightRAG
+llm_model_max_token_size: 32768
+use_entity_link_chunk: False  # Only set True for HippoRAG and FastGraphRAG
+enable_graph_augmentation: False
+
+token_model: gpt-3.5-turbo
+
+# Chunk Config 
+chunk:
+  chunk_token_size: 1200
+  chunk_overlap_token_size: 100
+  chunk_method: chunking_by_token_size
+
+# Graph Config 
+graph:
+    # Building graph
+    enable_entity_description: True
+    graph_type: passage_graph # passage_graph/er_graph/tree_graph/passage_graph
+    force: True    
+    prior_prob: 0.8
+    summary_max_tokens: 500
+    llm_model_max_token_size: 32768
+# Retrieval Config 
+retriever:
+    query_type: kgp    
+
+
+query: 
+    query_type: qa
+    top_k: 30
+    k_nei: 3
+ 

@@ -1,0 +1,98 @@
+################################# Working settings  #################################
+# Basic Config
+use_entities_vdb: True
+use_relations_vdb: False  # Only set True for LightRAG
+llm_model_max_token_size: 32768
+use_entity_link_chunk: False  # Only set True for HippoRAG and FastGraphRAG
+enable_graph_augmentation: False
+
+# Data
+
+index_name: tree_graph_balanced
+vdb_type: faiss  # vector/colbert
+
+# Chunk Config 
+chunk:
+  chunk_token_size: 1200 # Change the size of each chunk to see if bigger amounts favors lsh
+  chunk_overlap_token_size: 100
+  token_model: gpt-3.5-turbo
+  chunk_method: chunking_by_token_size
+
+# Graph Config 
+graph:
+  # enable LightRAG
+    enable_edge_keywords: False
+    graph_type: tree_graph_balanced 
+    force: True # Whether we enforce a tree rebuild
+    add: False # Whether this corpus given is regared as a addition
+
+    # Tree Config
+    build_tree_from_leaves: True
+    reduction_dimension: 10
+    summarization_length: 100
+    num_layers:  5 # For RAPTOR
+    top_k: 5
+    start_layer:  5
+    selection_mode: top_k
+    max_length_in_cluster: 3500
+    threshold: 0.1 # For RAPTOR 
+    cluster_metric: cosine
+    verbose: False
+    random_seed: 224
+    threshold_cluster_num: 5000
+    enforce_sub_communities: False
+    max_size_percentage: 0.2
+    tol: 1e-4
+    max_iter: 10
+    size_of_clusters: 10
+
+    
+
+
+# Retrieval Config 
+retriever:
+    query_type: basic
+    enable_local: False
+    use_entity_similarity_for_ppr: True
+    top_k_entity_for_ppr: 8
+    node_specificity: True
+    damping: 0.1
+    top_k: 5
+
+query: 
+    query_type: qa
+    only_need_context: False
+    enable_hybrid_query: True
+    augmentation_ppr: True
+    response_type: Multiple Paragraphs
+    level: 2
+    community_information: True
+    retrieve_top_k: 20
+    # naive search
+    naive_max_token_for_text_unit: 12000
+    # local search
+    local_max_token_for_text_unit: 4000  # 12000 * 0.33
+    max_token_for_text_unit: 4000
+    use_keywords: True
+    
+    # Knob for RAPTOR
+    tree_search: True
+
+    entities_max_tokens: 2000
+    relationships_max_tokens: 2000
+
+
+    max_token_for_local_context: 4800  # 12000 * 0.4
+    local_max_token_for_community_report: 3200  # 12000 * 0.27
+    local_community_single_one: False
+    # global search
+    use_global_query: True
+    global_min_community_rating:  0
+    global_max_consider_community: 512
+    global_max_token_for_community_report: 16384
+    max_token_for_global_context: 4000
+    global_special_community_map_llm_kwargs: {"response_format": {"type": "json_object"}}
+    # For IR-COT
+    max_ir_steps: 2
+    
+ 

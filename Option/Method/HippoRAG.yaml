@@ -1,0 +1,71 @@
+################################# Working settings  #################################
+# Basic Config
+use_entities_vdb: True
+use_relations_vdb: False  # Only set True for LightRAG
+llm_model_max_token_size: 32768
+use_entity_link_chunk: True  # Only set True for HippoRAG and FastGraphRAG
+enable_graph_augmentation: True
+
+# Data
+
+index_name: er_graph_colbert
+vdb_type: faiss  # vector/colbert
+# colbert_checkpoint_path: str = "/home/yingli/HippoRAG/exp/colbertv2.0"
+
+# Chunk Config 
+chunk:
+  chunk_token_size: 1200
+  chunk_overlap_token_size: 100
+  token_model: gpt-3.5-turbo
+  chunk_method: chunking_by_token_size
+
+# Graph Config 
+graph:
+  # enable LightRAG
+    enable_edge_keywords: False
+    graph_type: er_graph # rkg_graph/er_graph/tree_graph/passage_graph
+    force: False
+    # Building graph
+    extract_two_step: True
+    max_gleaning: 1
+    enable_entity_description: False
+    enable_entity_type: False
+    enable_edge_description: False
+    enable_edge_name: True
+    prior_prob:  0.8
+    similarity_max: 1.0
+    
+
+
+# Retrieval Config 
+retriever:
+    query_type: ppr # PPR is the retriever for HippoRAG
+    enable_local: False
+    use_entity_similarity_for_ppr: False
+    top_k_entity_for_ppr: 8
+    node_specificity: True
+    damping: 0.1
+    top_k: 5
+
+query: 
+    query_type: qa
+    only_need_context: False
+    enable_hybrid_query: True
+    augmentation_ppr: False
+    level: 2
+    community_information: True
+    retrieve_top_k: 20
+    # naive search
+    naive_max_token_for_text_unit: 12000
+    # local search
+    local_max_token_for_text_unit: 4000  # 12000 * 0.33
+    max_token_for_text_unit: 4000
+
+
+    entities_max_tokens: 2000
+    relationships_max_tokens: 2000
+
+    # For IR-COT
+    max_ir_steps: 2
+    
+ 
