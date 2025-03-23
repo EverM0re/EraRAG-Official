@@ -69,16 +69,9 @@ if __name__ == "__main__":
         data_dir=os.path.join(opt.data_root, opt.dataset_name)
     )
     corpus = query_dataset.get_corpus()
-    # corpus = corpus[:10]
 
     asyncio.run(digimon.insert(corpus))
 
     save_path = wrapper_query(query_dataset, digimon, result_dir)
 
     asyncio.run(wrapper_evaluation(save_path, opt, result_dir))
-
-    # for train_item in dataloader:
-
-    # a = asyncio.run(digimon.query("Who is Fred Gehrke?"))
-
-    # asyncio.run(digimon.query("Who is Scrooge?"))

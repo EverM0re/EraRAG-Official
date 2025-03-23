@@ -1,5 +1,6 @@
 import asyncio
 import numpy as np
+import pickle
 import json
 import os
 import random
@@ -16,8 +17,10 @@ from collections import defaultdict, deque
 from typing import List, Set, Tuple, Dict, Any
 
 Embedding = List[float]
-BUCKET_MAP_FILE = "/ssddata/zhengjun/GraphRAG-master/temp/bucket_map.json"
-EMBEDDINGS_FILE = "/ssddata/zhengjun/GraphRAG-master/temp/embeddings.npy"
+BUCKET_MAP_FILE = "/ssddata/zhengjun/temp/bucket_map.json"
+EMBEDDINGS_FILE = "/ssddata/zhengjun/temp/embeddings.npy"
+HYPERPLANE_FILE = "/ssddata/zhengjun/temp/hyperplanes.npy"
+
 
 class TreeGraphDynamic(BaseGraph):
     max_workers: int = 16
@@ -27,11 +30,6 @@ class TreeGraphDynamic(BaseGraph):
         self._graph: TreeGraphStorage = TreeGraphStorage()  # Tree index
         self.embedding_model = get_rag_embedding(config.embedding.api_type, config)  # Embedding model
         self.config = config.graph # Only keep the graph config
-
-        # 载入 bucket 信息和 embedding
-        self.bucket_map = self._load_bucket_map()
-        self.embedding_cache = self._load_embeddings()
-
         random.seed(self.config.random_seed)
 
 
@@ -52,6 +50,13 @@ class TreeGraphDynamic(BaseGraph):
 
     def _save_embeddings(self):
         np.save(EMBEDDINGS_FILE, self.embedding_cache)
+
+    def _save_hyperplanes(self, hyperplanes: np.ndarray):
+        np.save(HYPERPLANE_FILE, hyperplanes)
+
+    def _load_hyperplanes(self) -> np.ndarray:
+        if os.path.exists(HYPERPLANE_FILE):
+            return np.load(HYPERPLANE_FILE)
 
 
     def _create_task_for(self, func):
@@ -78,7 +83,7 @@ class TreeGraphDynamic(BaseGraph):
         
         n_samples = embeddings.shape[0]
         logger.info("Perform Clustering: n_samples = {n_samples}".format(n_samples=n_samples))
-        
+
         # Defined in GraphConfig.py
         num_hyperplanes = self.config.num_hyperplanes
         min_size = self.config.lower_limit
@@ -90,19 +95,13 @@ class TreeGraphDynamic(BaseGraph):
 
         # Generate hash function
         hyperplanes = np.random.randn(num_hyperplanes, dim)
+        self._save_hyperplanes(hyperplanes)
+        logger.info(f"✅ Hyperplanes saved.")
 
-        # 0/1 matrix generation
-        random_hash_matrix = np.random.randint(0, 2, size=(n_samples, num_hyperplanes))
-
-        
         def get_bucket_id(vec):
             projections = np.dot(vec, hyperplanes.T)
             binary_hash = (projections > 0).astype(int)
             return int(''.join(map(str, binary_hash)), 2)
-        
-        # def get_random_bucket_id(idx):
-        #     binary_hash = random_hash_matrix[idx]
-        #     return int(''.join(map(str, binary_hash)), 2)
         
         def analyze_bucket_distribution(buckets):
             size_counts = defaultdict(int)
@@ -148,24 +147,11 @@ class TreeGraphDynamic(BaseGraph):
         # Create initial hash bucket
         buckets = defaultdict(list)
 
-        # Normal Clustering
-        # for idx, vec in enumerate(embeddings):
-        #     bucket_id = get_bucket_id(vec)
-        #     buckets[bucket_id].append(idx)
-        
-
         for idx, vec in enumerate(embeddings):
-            if idx in self.embedding_cache:
-                continue  # 如果已有 embedding，跳过计算
             bucket_id = get_bucket_id(vec)
-            self.embedding_cache[idx] = vec  # 存储 embedding
-            self.bucket_map[idx] = bucket_id  # 存储 bucket_id
+            self.embedding_cache[idx] = vec
+            self.bucket_map[idx] = bucket_id
             buckets[bucket_id].append(idx)
-
-        # # Random Clustering
-        # for idx in range(n_samples):
-        #     bucket_id = get_random_bucket_id(idx)
-        #     buckets[bucket_id].append(idx)
         
         # Print bucket distribution
         print_bucket_stats(buckets)
@@ -217,6 +203,14 @@ class TreeGraphDynamic(BaseGraph):
                 labels_map[idx] = cluster_id
         labels = np.array([labels_map.get(i, -1) for i in range(n_samples)])
         
+        #  Save hyperplane, embedding and bucket data
+        self._save_hyperplanes(hyperplanes)
+        self.embedding_cache = {idx: vec for idx, vec in enumerate(embeddings)}
+        self._save_embeddings()
+        self.bucket_map = {idx: get_bucket_id(vec) for idx, vec in enumerate(embeddings)}
+        self._save_bucket_map()
+        logger.info("✅ 已保存 hyperplanes、embeddings、bucket map")
+
         return labels
 
 
@@ -308,6 +302,7 @@ class TreeGraphDynamic(BaseGraph):
                 break
 
             self._graph.add_layer()
+
             clusters = await self._clustering(nodes = self._graph.get_layer(layer))
 
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
@@ -333,10 +328,6 @@ class TreeGraphDynamic(BaseGraph):
             self._graph.clear()  # clear the storage before rebuilding
             self._graph.add_layer()
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-                # leaf_tasks = []
-                # for index, chunk in enumerate(chunks):
-                #     logger.info(index)
-                #     leaf_tasks.append(pool.submit(self._create_task_for(self._extract_entity_relationship), chunk_key_pair=chunk))
                 for i in range(0, self.max_workers):
                     leaf_tasks = [pool.submit(self._create_task_for(self._extract_entity_relationship_without_embedding), chunk_key_pair=chunk) for index, chunk in enumerate(chunks) if index % self.max_workers == i]
                     as_completed(leaf_tasks)
@@ -349,9 +340,15 @@ class TreeGraphDynamic(BaseGraph):
     
 
     # Add information to the tree given the additional dynamic chunks
-    async def _refine_graph(self, new_chunks: List[Any]) -> List[int]:
+    async def _refine_graph(
+            self, new_chunks: List[Any]
+        ) -> List[int]:
 
         logger.info(f"Refining graph with {len(new_chunks)} new chunks")
+
+        # load bucket id and embedding data
+        self.bucket_map = self._load_bucket_map()
+        self.embedding_cache = self._load_embeddings()
 
         new_node_indices = []
         new_embeddings = []
@@ -375,8 +372,9 @@ class TreeGraphDynamic(BaseGraph):
             self, new_embeddings: np.ndarray, new_node_indices: List[int]
         ) -> Tuple[Dict[int, List[int]], List[int]]:
 
-        num_hyperplanes = self.config.num_hyperplanes
-        hyperplanes = np.random.randn(num_hyperplanes, new_embeddings.shape[1])
+        # Load exsisting hyperplane data
+        hyperplanes = self._load_hyperplanes()
+
         bucket_changes = defaultdict(list)
         labels = []
 

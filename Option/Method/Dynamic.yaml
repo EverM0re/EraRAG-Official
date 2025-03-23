@@ -20,10 +20,9 @@ chunk:
 
 # Graph Config 
 graph:
-  # enable LightRAG
     enable_edge_keywords: False
     graph_type: tree_graph_dynamic
-    force: True # Must set to false in this case
+    force: True # Whether we enforce a tree rebuild
     add: False # Whether this corpus given is regared as a addition
 
     # Tree Config

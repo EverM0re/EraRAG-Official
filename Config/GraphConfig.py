@@ -9,6 +9,7 @@ class GraphConfig(YamlModel):
     extract_two_step: bool = True
     max_gleaning: int = 1
     force: bool = False
+    add: bool = False
 
     # For ER graph & KG graph and & RKG graph
     enable_entity_description: bool = False

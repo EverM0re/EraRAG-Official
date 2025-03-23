@@ -1,6 +1,7 @@
 import asyncio
 import numpy as np
 import random
+import json
 
 from Core.Graph.BaseGraph import BaseGraph
 from Core.Schema.ChunkSchema import TextChunk
@@ -14,6 +15,8 @@ from collections import defaultdict, deque
 from typing import List, Set, Any
 
 Embedding = List[float]
+BUCKET_MAP_FILE = "/ssddata/zhengjun/temp/bucket_map.json"
+EMBEDDINGS_FILE = "/ssddata/zhengjun/temp/embeddings.npy"
 
 class TreeGraphLSH(BaseGraph):
     max_workers: int = 16
@@ -24,6 +27,13 @@ class TreeGraphLSH(BaseGraph):
         self.embedding_model = get_rag_embedding(config.embedding.api_type, config)  # Embedding model
         self.config = config.graph # Only keep the graph config
         random.seed(self.config.random_seed)
+
+    def _save_bucket_map(self):
+        with open(BUCKET_MAP_FILE, "w") as f:
+            json.dump(self.bucket_map, f)
+
+    def _save_embeddings(self):
+        np.save(EMBEDDINGS_FILE, self.embedding_cache)
 
     def _create_task_for(self, func):
         def _pool_func(**params):
@@ -43,7 +53,6 @@ class TreeGraphLSH(BaseGraph):
         return _pool_func
 
     # hyper plain realization
-
     async def _perform_clustering(
         self, embeddings: np.ndarray
     ) -> List[np.ndarray]:
@@ -72,9 +81,9 @@ class TreeGraphLSH(BaseGraph):
             binary_hash = (projections > 0).astype(int)
             return int(''.join(map(str, binary_hash)), 2)
         
-        def get_random_bucket_id(idx):
-            binary_hash = random_hash_matrix[idx]
-            return int(''.join(map(str, binary_hash)), 2)
+        # def get_random_bucket_id(idx):
+        #     binary_hash = random_hash_matrix[idx]
+        #     return int(''.join(map(str, binary_hash)), 2)
         
         def analyze_bucket_distribution(buckets):
             size_counts = defaultdict(int)
