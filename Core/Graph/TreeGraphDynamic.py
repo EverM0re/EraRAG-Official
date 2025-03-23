@@ -15,12 +15,9 @@ from Core.Schema.TreeSchema import TreeNode
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict, deque
 from typing import List, Set, Tuple, Dict, Any
+from pathlib import Path
 
 Embedding = List[float]
-BUCKET_MAP_FILE = "/ssddata/zhengjun/temp/bucket_map.json"
-EMBEDDINGS_FILE = "/ssddata/zhengjun/temp/embeddings.npy"
-HYPERPLANE_FILE = "/ssddata/zhengjun/temp/hyperplanes.npy"
-
 
 class TreeGraphDynamic(BaseGraph):
     max_workers: int = 16
@@ -32,31 +29,43 @@ class TreeGraphDynamic(BaseGraph):
         self.config = config.graph # Only keep the graph config
         random.seed(self.config.random_seed)
 
+        clustering_dir = Path(self.workspace.make_for("clustering_stage"))
+        self.embedding_path = clustering_dir / "embeddings.npy"
+        self.bucket_path = clustering_dir / "bucket_ids.pkl"
+        self.hyperplane_path = clustering_dir / "hyperplanes.npy"
 
-    def _load_bucket_map(self):
-        if os.path.exists(BUCKET_MAP_FILE):
-            with open(BUCKET_MAP_FILE, "r") as f:
-                return json.load(f)
-        return {}
-
-    def _save_bucket_map(self):
-        with open(BUCKET_MAP_FILE, "w") as f:
-            json.dump(self.bucket_map, f)
-
-    def _load_embeddings(self):
-        if os.path.exists(EMBEDDINGS_FILE):
-            return np.load(EMBEDDINGS_FILE, allow_pickle=True).item()
-        return {}
 
     def _save_embeddings(self):
-        np.save(EMBEDDINGS_FILE, self.embedding_cache)
+        np.save(self.embedding_path, self.embedding_cache)
+
+    def _save_bucket_map(self):
+        with open(self.bucket_path, "wb") as f:
+            pickle.dump(self.bucket_map, f)
 
     def _save_hyperplanes(self, hyperplanes: np.ndarray):
-        np.save(HYPERPLANE_FILE, hyperplanes)
+        np.save(self.hyperplane_path, hyperplanes)
 
-    def _load_hyperplanes(self) -> np.ndarray:
-        if os.path.exists(HYPERPLANE_FILE):
-            return np.load(HYPERPLANE_FILE)
+    def _load_bucket_map(self):
+        if self.bucket_path.exists():
+            with open(self.bucket_path, "rb") as f:
+                return pickle.load(f)
+        return {}
+
+    def _load_embeddings(self):
+        if self.embedding_path.exists():
+            return np.load(self.embedding_path, allow_pickle=True).item()
+        return {}
+
+    def _load_hyperplanes(self):
+        if self.hyperplane_path.exists():
+            return np.load(self.hyperplane_path)
+        raise FileNotFoundError(f"Unfound file: {self.hyperplane_path}")
+
+    def _clear_previous_clustering_files(self):
+        for path in [self.embedding_path, self.bucket_path, self.hyperplane_path]:
+            if path.exists():
+                path.unlink()
+                logger.info(f"🗑️Unfound file:{path}")
 
 
     def _create_task_for(self, func):
@@ -88,6 +97,9 @@ class TreeGraphDynamic(BaseGraph):
         num_hyperplanes = self.config.num_hyperplanes
         min_size = self.config.lower_limit
         max_size = self.config.upper_limit
+
+        # Clear current temporary files
+        self._clear_previous_clustering_files()
 
         # Data Preprocessing
         embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -129,20 +141,24 @@ class TreeGraphDynamic(BaseGraph):
         # See the stat of each layer of bucketing
         def print_bucket_stats(buckets):
             stats = analyze_bucket_distribution(buckets)
-            print("\n=== LSH桶分布分析 ===")
-            print(f"总桶数: {stats['total_buckets']}")
-            print(f"最大桶: {stats['max_size']} 元素")
-            print(f"最小桶: {stats['min_size']} 元素")
-            print(f"平均桶: {stats['avg_size']} 元素")
-            print("\n桶大小分布表:")
-            print(f"{'大小':<8} | {'桶数量':<8} | {'累积占比':<10}")
+            print("\n=== LSH Bucket Distribution Analysis ===")
+            print(f"Total Buckets: {stats['total_buckets']}")
+            print(f"Biggest Buckets: {stats['max_size']} Elements")
+            print(f"Smallest Buckets: {stats['min_size']} Elemants")
+            print(f"Average Size: {stats['avg_size']} Elements")
+            print("\nBucket Size:")
+            print(f"{'Size':<8} | {'Count':<8} | {'Percntage':<10}")
             cumulative = 0
             total = stats['total_buckets']
             for size, count in stats['size_distribution'].items():
                 percent = count / total * 100
                 cumulative += percent
                 print(f"{size:<8} | {count:<8} | {cumulative:>8.1f}%")
-
+                    # Check point for each layer of clustering
+            print("\n=== Clustering Result ===")
+            print(f"Total Clusters: {len(clusters)}")
+            sizes = [len(c) for c in clusters]
+            print(f"Cluster Distribution: Biggest {max(sizes)}, Smallest {min(sizes)}, Average {np.mean(sizes):.1f}")
 
         # Create initial hash bucket
         buckets = defaultdict(list)
@@ -152,9 +168,6 @@ class TreeGraphDynamic(BaseGraph):
             self.embedding_cache[idx] = vec
             self.bucket_map[idx] = bucket_id
             buckets[bucket_id].append(idx)
-        
-        # Print bucket distribution
-        print_bucket_stats(buckets)
         
         # Process buckets -> Generate final clusters
         sorted_buckets = sorted(buckets.items(), key=lambda x: x[0])
@@ -191,11 +204,8 @@ class TreeGraphDynamic(BaseGraph):
         if current_cluster:
             clusters.append(current_cluster)
         
-        # Check point for each layer of clustering
-        print("\n=== 最终聚类结果 ===")
-        print(f"总聚类数: {len(clusters)}")
-        sizes = [len(c) for c in clusters]
-        print(f"聚类大小分布: 最大 {max(sizes)}, 最小 {min(sizes)}, 平均 {np.mean(sizes):.1f}")
+        # Print bucket distribution
+        print_bucket_stats(buckets)
 
         # Turn cluster result into easy to process labels
         for cluster_id, cluster in enumerate(clusters):
@@ -212,6 +222,7 @@ class TreeGraphDynamic(BaseGraph):
         logger.info("✅ 已保存 hyperplanes、embeddings、bucket map")
 
         return labels
+
 
 
     async def _clustering(
@@ -295,6 +306,7 @@ class TreeGraphDynamic(BaseGraph):
             node.index = start_id
             start_id += 1
 
+
     async def _build_tree_from_leaves(self):
         for layer in range(self.config.num_layers):  # build a new layer
             logger.info("length of layer: {length}".format(length=len(self._graph.get_layer(layer))))
@@ -319,6 +331,7 @@ class TreeGraphDynamic(BaseGraph):
         logger.info(self._graph.num_layers)
         
 
+
     # Construct the graph from scratch
     async def _build_graph(self, chunks: List[Any]):
         is_load = await self._graph.load_tree_graph_from_leaves()
@@ -338,6 +351,7 @@ class TreeGraphDynamic(BaseGraph):
             await self._graph.write_tree_leaves()
         await self._build_tree_from_leaves()
     
+
 
     # Add information to the tree given the additional dynamic chunks
     async def _refine_graph(
