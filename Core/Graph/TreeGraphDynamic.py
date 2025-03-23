@@ -29,10 +29,9 @@ class TreeGraphDynamic(BaseGraph):
         self.config = config.graph # Only keep the graph config
         random.seed(self.config.random_seed)
 
-        clustering_dir = Path(self.workspace.make_for("clustering_stage"))
-        self.embedding_path = clustering_dir / "embeddings.npy"
-        self.bucket_path = clustering_dir / "bucket_ids.pkl"
-        self.hyperplane_path = clustering_dir / "hyperplanes.npy"
+        self.embedding_path = "/ssddata/zhengjun/temp/embeddings.npy"
+        self.bucket_path = "/ssddata/zhengjun/temp/bucket_ids.pkl"
+        self.hyperplane_path = "/ssddata/zhengjun/temp/hyperplanes.npy"
 
 
     def _save_embeddings(self):
@@ -65,7 +64,7 @@ class TreeGraphDynamic(BaseGraph):
         for path in [self.embedding_path, self.bucket_path, self.hyperplane_path]:
             if path.exists():
                 path.unlink()
-                logger.info(f"🗑️Unfound file:{path}")
+                logger.info(f"🗑️ Unfound file:{path}")
 
 
     def _create_task_for(self, func):
