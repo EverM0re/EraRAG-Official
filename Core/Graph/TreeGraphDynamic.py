@@ -86,7 +86,7 @@ class TreeGraphDynamic(BaseGraph):
 
     # hyper plain realization
     async def _perform_clustering(
-        self, embeddings: np.ndarray
+        self, embeddings: np.ndarray, refine: bool = False
     ) -> List[np.ndarray]:
         
         n_samples = embeddings.shape[0]
@@ -105,8 +105,11 @@ class TreeGraphDynamic(BaseGraph):
         n_samples, dim = embeddings.shape
 
         # Generate hash function
-        hyperplanes = np.random.randn(num_hyperplanes, dim)
-        self._save_hyperplanes(hyperplanes)
+        if refine:
+            hyperplanes = self._load_hyperplanes()
+        else:
+            hyperplanes = np.random.randn(num_hyperplanes, dim)
+            self._save_hyperplanes(hyperplanes)
         logger.info(f"✅ Hyperplanes saved.")
 
         def get_bucket_id(vec):
@@ -226,13 +229,13 @@ class TreeGraphDynamic(BaseGraph):
 
 
     async def _clustering(
-            self, nodes: List[TreeNode]
+            self, nodes: List[TreeNode], refine: bool = False
         ) -> List[List[TreeNode]]:
         
         # Get the embeddings from the nodes
         embeddings = np.array([node.embedding for node in nodes])
         # Perform the clustering
-        clusters = await self._perform_clustering(embeddings)
+        clusters = await self._perform_clustering(embeddings, refine)
         unique_values, inverse_indices = np.unique(clusters, return_inverse=True)
         sorted_indices = np.argsort(inverse_indices)
         clustered_indices = np.split(sorted_indices, np.cumsum(np.bincount(inverse_indices))[:-1])
@@ -305,6 +308,7 @@ class TreeGraphDynamic(BaseGraph):
             start_id += 1
 
 
+    # Build logic
     async def _build_tree_from_leaves(self):
         for layer in range(self.config.num_layers):  # build a new layer
             logger.info("length of layer: {length}".format(length=len(self._graph.get_layer(layer))))
@@ -313,7 +317,31 @@ class TreeGraphDynamic(BaseGraph):
 
             self._graph.add_layer()
 
-            clusters = await self._clustering(nodes = self._graph.get_layer(layer))
+            clusters = await self._clustering(nodes = self._graph.get_layer(layer), refine = False)
+
+            with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+                for i in range(0, self.max_workers):
+                    cluster_tasks = [pool.submit(self._create_task_for(self._extract_cluster_relationship_without_embedding), layer = layer + 1, cluster = cluster) for (j, cluster) in enumerate(clusters) if j % self.max_workers == i]
+                    as_completed(cluster_tasks)
+
+            logger.info("To batch embed current layer")
+            await self._batch_embed_and_assign(self._graph.num_layers - 1)
+
+
+            logger.info("Layer: {layer}".format(layer=layer))
+
+        logger.info(self._graph.num_layers)
+
+    # Refine logic
+    async def _refine_tree_from_leaves(self):
+        for layer in range(self.config.num_layers):  # build a new layer
+            logger.info("length of layer: {length}".format(length=len(self._graph.get_layer(layer))))
+            if len(self._graph.get_layer(layer)) <= self.config.reduction_dimension + 1:
+                break
+
+            self._graph.add_layer()
+
+            clusters = await self._clustering(nodes = self._graph.get_layer(layer), refine = True)
 
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
                 for i in range(0, self.max_workers):
@@ -366,6 +394,7 @@ class TreeGraphDynamic(BaseGraph):
                     ) for index, chunk in enumerate(new_chunks) if index % self.max_workers == i]
                     as_completed(leaf_tasks)
 
+            # Load new chunk embeddings into self._graph
             await self._batch_embed_and_assign(self._graph.num_layers - 1)
             await self._graph.write_tree_leaves()
 
@@ -387,86 +416,86 @@ class TreeGraphDynamic(BaseGraph):
             await self._graph.write_tree_leaves()
 
         logger.info(f"Refining graph with {len(new_chunks)} new chunks")
-        await self._build_tree_from_leaves()
+        await self._refine_tree_from_leaves()
 
 
-    async def _refine_graph(self, new_chunks: List[Any]):
-        is_load = await self._graph.load_tree_graph_from_leaves()
-        if is_load:
-            logger.info(f"Loaded {len(self._graph.leaf_nodes)} Leaf Embeddings")
+    # async def _refine_graph(self, new_chunks: List[Any]):
+    #     is_load = await self._graph.load_tree_graph_from_leaves()
+    #     if is_load:
+    #         logger.info(f"Loaded {len(self._graph.leaf_nodes)} Leaf Embeddings")
 
-        logger.info(f"Refining graph with {len(new_chunks)} new chunks")
+    #     logger.info(f"Refining graph with {len(new_chunks)} new chunks")
 
-        # load bucket id and embedding data
-        # Todo: 此处直接进行读取了所有层的bucket ID？
-        self.bucket_map = self._load_bucket_map()
-        # self.embedding_cache = self._load_embeddings()
+    #     # load bucket id and embedding data
+    #     # Todo: 此处直接进行读取了所有层的bucket ID？
+    #     self.bucket_map = self._load_bucket_map()
+    #     # self.embedding_cache = self._load_embeddings()
 
-        # New chunks pre-processing
-        new_node_indices = []
-        new_embeddings = []
-        for chunk in new_chunks:
-            node_id = self._graph.num_nodes
-            embedding = self._embed_text(chunk["text"])
-            new_node_indices.append(node_id)
-            new_embeddings.append(embedding)
-            self.embedding_cache[node_id] = embedding
+    #     # New chunks pre-processing
+    #     new_node_indices = []
+    #     new_embeddings = []
+    #     for chunk in new_chunks:
+    #         node_id = self._graph.num_nodes
+    #         embedding = self._embed_text(chunk["text"])
+    #         new_node_indices.append(node_id)
+    #         new_embeddings.append(embedding)
+    #         self.embedding_cache[node_id] = embedding
 
-        new_embeddings = np.array(new_embeddings)
-        bucket_changes, labels = await self._map_to_existing_buckets(new_embeddings, new_node_indices)
+    #     new_embeddings = np.array(new_embeddings)
+    #     bucket_changes, labels = await self._map_to_existing_buckets(new_embeddings, new_node_indices)
 
-        affected_buckets = set(bucket_changes.keys())
-        logger.info(f"Affected buckets: {affected_buckets}")
-        await self._recluster_affected_nodes(affected_buckets)
+    #     affected_buckets = set(bucket_changes.keys())
+    #     logger.info(f"Affected buckets: {affected_buckets}")
+    #     await self._recluster_affected_nodes(affected_buckets)
 
-        return labels 
+    #     return labels 
 
-    async def _map_to_existing_buckets(
-            self, new_embeddings: np.ndarray, new_node_indices: List[int]
-        ) -> Tuple[Dict[int, List[int]], List[int]]:
+    # async def _map_to_existing_buckets(
+    #         self, new_embeddings: np.ndarray, new_node_indices: List[int]
+    #     ) -> Tuple[Dict[int, List[int]], List[int]]:
 
-        # Load exsisting hyperplane data
-        hyperplanes = self._load_hyperplanes()
+    #     # Load exsisting hyperplane data
+    #     hyperplanes = self._load_hyperplanes()
 
-        bucket_changes = defaultdict(list)
-        labels = []
+    #     bucket_changes = defaultdict(list)
+    #     labels = []
 
-        def get_bucket_id(vec):
-            projections = np.dot(vec, hyperplanes.T)
-            binary_hash = (projections > 0).astype(int)
-            return int(''.join(map(str, binary_hash)), 2)
+    #     def get_bucket_id(vec):
+    #         projections = np.dot(vec, hyperplanes.T)
+    #         binary_hash = (projections > 0).astype(int)
+    #         return int(''.join(map(str, binary_hash)), 2)
 
-        for node_idx, vec in zip(new_node_indices, new_embeddings):
-            bucket_id = get_bucket_id(vec)
-            self.bucket_map[str(node_idx)] = bucket_id
-            bucket_changes[bucket_id].append(node_idx)
-            labels.append(bucket_id)  # label = bucket_id
+    #     for node_idx, vec in zip(new_node_indices, new_embeddings):
+    #         bucket_id = get_bucket_id(vec)
+    #         self.bucket_map[str(node_idx)] = bucket_id
+    #         bucket_changes[bucket_id].append(node_idx)
+    #         labels.append(bucket_id)  # label = bucket_id
 
-        self._save_bucket_map()
-        return bucket_changes, labels
+    #     self._save_bucket_map()
+    #     return bucket_changes, labels
 
 
-    async def _recluster_affected_nodes(self, affected_buckets: Set[int]):
-        affected_nodes = []
-        for bucket_id in affected_buckets:
-            affected_nodes.extend(self.bucket_map[bucket_id]) 
+    # async def _recluster_affected_nodes(self, affected_buckets: Set[int]):
+    #     affected_nodes = []
+    #     for bucket_id in affected_buckets:
+    #         affected_nodes.extend(self.bucket_map[bucket_id]) 
 
-        # 重新 summary 父节点
-        updated_parents = set()
-        for node in affected_nodes:
-            parent_id = self._graph.get_parent(node)
-            if parent_id:
-                updated_parents.add(parent_id)
+    #     # 重新 summary 父节点
+    #     updated_parents = set()
+    #     for node in affected_nodes:
+    #         parent_id = self._graph.get_parent(node)
+    #         if parent_id:
+    #             updated_parents.add(parent_id)
         
-        # 重新对受影响的父节点进行 summary
-        for parent_id in updated_parents:
-            children = self._graph.get_children(parent_id)
-            new_summary = await self._summarize_from_cluster(children, self.config.summarization_length)
-            self._graph.update_summary(parent_id, new_summary)
+    #     # 重新对受影响的父节点进行 summary
+    #     for parent_id in updated_parents:
+    #         children = self._graph.get_children(parent_id)
+    #         new_summary = await self._summarize_from_cluster(children, self.config.summarization_length)
+    #         self._graph.update_summary(parent_id, new_summary)
 
-        # 逐层向上
-        if updated_parents:
-            await self._recluster_affected_nodes(updated_parents)
+    #     # 逐层向上
+    #     if updated_parents:
+    #         await self._recluster_affected_nodes(updated_parents)
 
         
     @property
