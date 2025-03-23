@@ -17,7 +17,9 @@ from Core.Provider.BaseLLM import BaseLLM
 from Core.Provider.LLMProviderRegister import create_llm_instance
 
 
-nltk_path = "/ssddata/zhengjun/GraphRAG-master/NLTK"
+# Path to your downloaded tokenizer
+nltk_path = "/ssddata/zhengjun/NLTK"
+
 # add the nltk_path to the nltk.data.path
 nltk.data.path.append(nltk_path)
 

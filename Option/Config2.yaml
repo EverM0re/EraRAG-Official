@@ -17,15 +17,12 @@ embedding:
 
   cache_dir: "/ssddata/zhengjun/GraphRAG-master/cache"
   
-  dimensions: 1024 # 更换模型时记得更改维度
+  dimensions: 1024 # Mathes your chunking model dimension
   max_token_size: 8102
   embed_batch_size: 128
   embedding_func_max_async: 16
  
-data_root: /ssddata/zhengjun/GraphRAG-master/Data # Root directory for data
-
-# working_dir: ./test_book # Result directory for the experiment
-# exp_name: test_tog # Experiment name
+data_root: /ssddata/zhengjun/Data # Root directory for data
 
 working_dir: /ssddata/zhengjun/Dataset_tests # Result directory for the experiment
 exp_name: tree_graph # Experiment name
