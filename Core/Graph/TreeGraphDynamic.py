@@ -29,9 +29,10 @@ class TreeGraphDynamic(BaseGraph):
         self.config = config.graph # Only keep the graph config
         random.seed(self.config.random_seed)
 
-        self.embedding_path = "/ssddata/zhengjun/temp/embeddings.npy"
-        self.bucket_path = "/ssddata/zhengjun/temp/bucket_ids.pkl"
-        self.hyperplane_path = "/ssddata/zhengjun/temp/hyperplanes.npy"
+        clustering_dir = Path(self.workspace.make_for("clustering_stage"))
+        self.embedding_path = clustering_dir / "embeddings.npy"
+        self.bucket_path = clustering_dir / "bucket_ids.pkl"
+        self.hyperplane_path = clustering_dir / "hyperplanes.npy"
 
 
     def _save_embeddings(self):
@@ -110,7 +111,7 @@ class TreeGraphDynamic(BaseGraph):
         else:
             hyperplanes = np.random.randn(num_hyperplanes, dim)
             self._save_hyperplanes(hyperplanes)
-        logger.info(f"✅ Hyperplanes saved.")
+            logger.info(f"✅ Hyperplanes saved.")
 
         def get_bucket_id(vec):
             projections = np.dot(vec, hyperplanes.T)
@@ -327,7 +328,6 @@ class TreeGraphDynamic(BaseGraph):
             logger.info("To batch embed current layer")
             await self._batch_embed_and_assign(self._graph.num_layers - 1)
 
-
             logger.info("Layer: {layer}".format(layer=layer))
 
         logger.info(self._graph.num_layers)
@@ -378,124 +378,23 @@ class TreeGraphDynamic(BaseGraph):
     
     # Add information to the tree given the additional dynamic chunks
     async def _refine_graph(self, new_chunks: List[Any]):
-        # 不确定已有的是否可行？不行则使用后写的embedding storage
-        is_load = await self._graph.load_tree_graph_from_leaves()
+        # Todo: 每次load数据集不同则名字不同
+        is_load = await self._graph.load_full_tree_graph()
         
-        if is_load: # 如果正常load了已有的embedding则触发逻辑，直接在基础上加入新chunks的embedding
+        if is_load:
             # 📓 Todo: 本模块有待测试
             logger.info(f"Loaded {len(self._graph.leaf_nodes)} Leaf Embeddings")
             logger.info(f"Appending {len(new_chunks)} new chunks to existing leaf layer")
-
-            with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-                for i in range(0, self.max_workers):
-                    leaf_tasks = [pool.submit(
-                        self._create_task_for(self._extract_entity_relationship_without_embedding),
-                        chunk_key_pair=chunk
-                    ) for index, chunk in enumerate(new_chunks) if index % self.max_workers == i]
-                    as_completed(leaf_tasks)
 
             # Load new chunk embeddings into self._graph
             await self._batch_embed_and_assign(self._graph.num_layers - 1)
             await self._graph.write_tree_leaves()
 
-        else: # 否则正常从零开始建embedding，与build_graph函数逻辑相同
-            self._graph.clear()
-            self._graph.add_layer()
-
-            with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-                for i in range(0, self.max_workers):
-                    leaf_tasks = [pool.submit(
-                        self._create_task_for(self._extract_entity_relationship_without_embedding),
-                        chunk_key_pair=chunk
-                    ) for index, chunk in enumerate(new_chunks) if index % self.max_workers == i]
-                    as_completed(leaf_tasks)
-
-            logger.info(f"To batch embed leaves")
-            await self._batch_embed_and_assign(self._graph.num_layers - 1)
-            logger.info(f"Created {len(self._graph.leaf_nodes)} Leaf Embeddings")
-            await self._graph.write_tree_leaves()
+        else:
+            logger.error(f"No existing tree for insertion mode!")
 
         logger.info(f"Refining graph with {len(new_chunks)} new chunks")
         await self._refine_tree_from_leaves()
-
-
-    # async def _refine_graph(self, new_chunks: List[Any]):
-    #     is_load = await self._graph.load_tree_graph_from_leaves()
-    #     if is_load:
-    #         logger.info(f"Loaded {len(self._graph.leaf_nodes)} Leaf Embeddings")
-
-    #     logger.info(f"Refining graph with {len(new_chunks)} new chunks")
-
-    #     # load bucket id and embedding data
-    #     # Todo: 此处直接进行读取了所有层的bucket ID？
-    #     self.bucket_map = self._load_bucket_map()
-    #     # self.embedding_cache = self._load_embeddings()
-
-    #     # New chunks pre-processing
-    #     new_node_indices = []
-    #     new_embeddings = []
-    #     for chunk in new_chunks:
-    #         node_id = self._graph.num_nodes
-    #         embedding = self._embed_text(chunk["text"])
-    #         new_node_indices.append(node_id)
-    #         new_embeddings.append(embedding)
-    #         self.embedding_cache[node_id] = embedding
-
-    #     new_embeddings = np.array(new_embeddings)
-    #     bucket_changes, labels = await self._map_to_existing_buckets(new_embeddings, new_node_indices)
-
-    #     affected_buckets = set(bucket_changes.keys())
-    #     logger.info(f"Affected buckets: {affected_buckets}")
-    #     await self._recluster_affected_nodes(affected_buckets)
-
-    #     return labels 
-
-    # async def _map_to_existing_buckets(
-    #         self, new_embeddings: np.ndarray, new_node_indices: List[int]
-    #     ) -> Tuple[Dict[int, List[int]], List[int]]:
-
-    #     # Load exsisting hyperplane data
-    #     hyperplanes = self._load_hyperplanes()
-
-    #     bucket_changes = defaultdict(list)
-    #     labels = []
-
-    #     def get_bucket_id(vec):
-    #         projections = np.dot(vec, hyperplanes.T)
-    #         binary_hash = (projections > 0).astype(int)
-    #         return int(''.join(map(str, binary_hash)), 2)
-
-    #     for node_idx, vec in zip(new_node_indices, new_embeddings):
-    #         bucket_id = get_bucket_id(vec)
-    #         self.bucket_map[str(node_idx)] = bucket_id
-    #         bucket_changes[bucket_id].append(node_idx)
-    #         labels.append(bucket_id)  # label = bucket_id
-
-    #     self._save_bucket_map()
-    #     return bucket_changes, labels
-
-
-    # async def _recluster_affected_nodes(self, affected_buckets: Set[int]):
-    #     affected_nodes = []
-    #     for bucket_id in affected_buckets:
-    #         affected_nodes.extend(self.bucket_map[bucket_id]) 
-
-    #     # 重新 summary 父节点
-    #     updated_parents = set()
-    #     for node in affected_nodes:
-    #         parent_id = self._graph.get_parent(node)
-    #         if parent_id:
-    #             updated_parents.add(parent_id)
-        
-    #     # 重新对受影响的父节点进行 summary
-    #     for parent_id in updated_parents:
-    #         children = self._graph.get_children(parent_id)
-    #         new_summary = await self._summarize_from_cluster(children, self.config.summarization_length)
-    #         self._graph.update_summary(parent_id, new_summary)
-
-    #     # 逐层向上
-    #     if updated_parents:
-    #         await self._recluster_affected_nodes(updated_parents)
 
         
     @property

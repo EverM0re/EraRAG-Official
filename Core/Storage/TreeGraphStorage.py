@@ -68,6 +68,23 @@ class TreeGraphStorage(BaseGraphStorage):
             # Pkl file doesn't exist; need to construct the tree from scratch
             logger.info("Pkl file does not exist! Need to build the tree from scratch.")
             return False
+        
+    async def load_full_tree_graph(self, force: bool = False) -> bool:
+
+        logger.info(f"Attempting to load the full tree from: {self.tree_pkl_file}")
+        
+        if os.path.exists(self.tree_pkl_file):
+            try:
+                with open(self.tree_pkl_file, "rb") as f:
+                    self._tree = pickle.load(f)
+                logger.info(f"Successfully loaded full tree with {len(self._tree.leaf_nodes)} leaves and {self._tree.num_layers} layers.")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to load full tree from: {self.tree_pkl_file} - {e}")
+                return False
+        else:
+            logger.warning("Full tree file does not exist. Need to build from scratch.")
+            return False
 
     @property
     def tree(self):
