@@ -164,6 +164,9 @@ class TreeGraphDynamic(BaseGraph):
 
         for idx, vec in enumerate(embeddings):
             bucket_id = get_bucket_id(vec)
+
+            # Save current bucket info & embedding
+            # Todo: 此处逻辑会多次调用（5层封顶），每一层bucket ID都储存在同一个文件该怎么进行读取和后续操作？
             self.embedding_cache[idx] = vec
             self.bucket_map[idx] = bucket_id
             buckets[bucket_id].append(idx)
@@ -214,11 +217,9 @@ class TreeGraphDynamic(BaseGraph):
         
         #  Save hyperplane, embedding and bucket data
         self._save_hyperplanes(hyperplanes)
-        self.embedding_cache = {idx: vec for idx, vec in enumerate(embeddings)}
         self._save_embeddings()
-        self.bucket_map = {idx: get_bucket_id(vec) for idx, vec in enumerate(embeddings)}
         self._save_bucket_map()
-        logger.info("✅ 已保存 hyperplanes、embeddings、bucket map")
+        logger.info("✅ hyperplanes, embedding and bucket map saved")
 
         return labels
 
@@ -232,8 +233,6 @@ class TreeGraphDynamic(BaseGraph):
         embeddings = np.array([node.embedding for node in nodes])
         # Perform the clustering
         clusters = await self._perform_clustering(embeddings)
-
-        # todo：进行桶的调整
         unique_values, inverse_indices = np.unique(clusters, return_inverse=True)
         sorted_indices = np.argsort(inverse_indices)
         clustered_indices = np.split(sorted_indices, np.cumsum(np.bincount(inverse_indices))[:-1])
@@ -328,7 +327,6 @@ class TreeGraphDynamic(BaseGraph):
             logger.info("Layer: {layer}".format(layer=layer))
 
         logger.info(self._graph.num_layers)
-        
 
 
     # Construct the graph from scratch
@@ -350,19 +348,61 @@ class TreeGraphDynamic(BaseGraph):
             await self._graph.write_tree_leaves()
         await self._build_tree_from_leaves()
     
-
-
     # Add information to the tree given the additional dynamic chunks
-    async def _refine_graph(
-            self, new_chunks: List[Any]
-        ) -> List[int]:
+    async def _refine_graph(self, new_chunks: List[Any]):
+        # 不确定已有的是否可行？不行则使用后写的embedding storage
+        is_load = await self._graph.load_tree_graph_from_leaves()
+        
+        if is_load: # 如果正常load了已有的embedding则触发逻辑，直接在基础上加入新chunks的embedding
+            # 📓 Todo: 本模块有待测试
+            logger.info(f"Loaded {len(self._graph.leaf_nodes)} Leaf Embeddings")
+            logger.info(f"Appending {len(new_chunks)} new chunks to existing leaf layer")
+
+            with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+                for i in range(0, self.max_workers):
+                    leaf_tasks = [pool.submit(
+                        self._create_task_for(self._extract_entity_relationship_without_embedding),
+                        chunk_key_pair=chunk
+                    ) for index, chunk in enumerate(new_chunks) if index % self.max_workers == i]
+                    as_completed(leaf_tasks)
+
+            await self._batch_embed_and_assign(self._graph.num_layers - 1)
+            await self._graph.write_tree_leaves()
+
+        else: # 否则正常从零开始建embedding，与build_graph函数逻辑相同
+            self._graph.clear()
+            self._graph.add_layer()
+
+            with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+                for i in range(0, self.max_workers):
+                    leaf_tasks = [pool.submit(
+                        self._create_task_for(self._extract_entity_relationship_without_embedding),
+                        chunk_key_pair=chunk
+                    ) for index, chunk in enumerate(new_chunks) if index % self.max_workers == i]
+                    as_completed(leaf_tasks)
+
+            logger.info(f"To batch embed leaves")
+            await self._batch_embed_and_assign(self._graph.num_layers - 1)
+            logger.info(f"Created {len(self._graph.leaf_nodes)} Leaf Embeddings")
+            await self._graph.write_tree_leaves()
+
+        logger.info(f"Refining graph with {len(new_chunks)} new chunks")
+        await self._build_tree_from_leaves()
+
+
+    async def _refine_graph(self, new_chunks: List[Any]):
+        is_load = await self._graph.load_tree_graph_from_leaves()
+        if is_load:
+            logger.info(f"Loaded {len(self._graph.leaf_nodes)} Leaf Embeddings")
 
         logger.info(f"Refining graph with {len(new_chunks)} new chunks")
 
         # load bucket id and embedding data
+        # Todo: 此处直接进行读取了所有层的bucket ID？
         self.bucket_map = self._load_bucket_map()
-        self.embedding_cache = self._load_embeddings()
+        # self.embedding_cache = self._load_embeddings()
 
+        # New chunks pre-processing
         new_node_indices = []
         new_embeddings = []
         for chunk in new_chunks:
