@@ -29,10 +29,14 @@ class TreeGraphDynamic(BaseGraph):
         self.config = config.graph # Only keep the graph config
         random.seed(self.config.random_seed)
 
-        clustering_dir = Path(self.workspace.make_for("clustering_stage"))
-        self.embedding_path = clustering_dir / "embeddings.npy"
-        self.bucket_path = clustering_dir / "bucket_ids.pkl"
-        self.hyperplane_path = clustering_dir / "hyperplanes.npy"
+        # clustering_dir = Path(self.workspace.make_for("clustering_stage"))
+        ns_clusering = self.workspace.make_for("ns_clustering")
+        # self.embedding_path = clustering_dir / "embeddings.npy"
+        self.embedding_path = ns_clusering.get_saved_path("embeddings.npy")
+        # self.bucket_path = clustering_dir / "bucket_ids.pkl"
+        self.bucket_path = ns_clusering.get_saved_path("bucket_ids.pkl")
+        # self.hyperplane_path = clustering_dir / "hyperplanes.npy"
+        self.hyperplane_path = ns_clusering.get_saved_path("hyperplanes.npy")
 
 
     def _save_embeddings(self):
