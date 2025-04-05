@@ -22,8 +22,8 @@ chunk:
 graph:
     enable_edge_keywords: False
     graph_type: tree_graph_dynamic
-    force: True # Whether we enforce a tree rebuild
-    add: False # Whether this corpus given is regared as a addition
+    force: False # Whether we enforce a tree rebuild
+    add: True # Whether this corpus given is regared as a addition
 
     # Tree Config
     build_tree_from_leaves: True

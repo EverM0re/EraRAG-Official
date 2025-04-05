@@ -10,13 +10,18 @@ from Core.Common.Constants import CONFIG_ROOT, GRAPHRAG_ROOT
 from Core.Utils.YamlModel import YamlModel
 
 
+
 class WorkingParams(BaseModel):
     """Working parameters"""
 
-    working_dir: str = "/ssddata/zhengjun/GraphRAG-master/Dataset_tests"
-    exp_name: str = "multihop-mini"
-    data_root: str = "/ssddata/zhengjun/GraphRAG-master/Data"
-    dataset_name: str = "multihop-mini"
+    # working_dir: str = "/ssddata/zhengjun/GraphRAG-master/Dataset_tests"
+    # exp_name: str = "multi-1"
+    # data_root: str = "/ssddata/zhengjun/GraphRAG-master/Data"
+    # dataset_name: str = "multi-1"
+    working_dir: str = ""
+    exp_name: str = ""
+    data_root: str = ""
+    dataset_name: str = ""
 
 
 class Config(WorkingParams, YamlModel):
@@ -87,6 +92,7 @@ class Config(WorkingParams, YamlModel):
         opt += [Config.read_yaml(path) for path in default_config_paths]
     
         final = merge_dict(opt)
+        print(f"final.working_dir: {final.get('working_dir')}")
         final["dataset_name"] = dataset_name
         final["working_dir"] = os.path.join(final["working_dir"], dataset_name)
         return Config(**final)

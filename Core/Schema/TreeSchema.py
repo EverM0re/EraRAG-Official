@@ -1,4 +1,5 @@
 from typing import Dict, List, Set, Tuple, Optional
+import time
 
 class TreeNode:
     def __init__(self, text: str, index: int, children: Set[int], embedding) -> None:
@@ -6,6 +7,7 @@ class TreeNode:
         self.index = index
         self.children = children
         self.embedding = embedding
+
 
 class TreeSchema:
     def __init__(

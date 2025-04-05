@@ -2,7 +2,7 @@ from Core.Storage.BaseGraphStorage import BaseGraphStorage
 from Core.Schema.TreeSchema import TreeNode, TreeSchema
 from Core.Common.Logger import logger
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import os
 import pickle
@@ -127,14 +127,18 @@ class TreeGraphStorage(BaseGraphStorage):
 
     def get_layer(self, layer: int):
         return self._tree.layer_to_nodes[layer]
+    
+    def replace_layer(self, layer: int, nodes: List[TreeNode]):
+        assert layer < self.num_layers, "Layer to replace is out of range"
+        self._tree.layer_to_nodes[layer] = nodes
 
-    def upsert_node(self, node_id: int, node_data: Dict[str, Any]):
+    def upsert_node(self, node_id: int, node_data: Dict[str, Any]) ->TreeNode:
         node = TreeNode(index=node_id, text=node_data['text'], children=node_data['children'],
                         embedding=node_data['embedding'])
         layer = node_data['layer']
         self._tree.layer_to_nodes[layer].append(node)
         self._tree.all_nodes.append(node)
-        return
+        return node
 
     async def load_graph(self, force: bool = False) -> bool:
         return await self.load_tree_graph(force)

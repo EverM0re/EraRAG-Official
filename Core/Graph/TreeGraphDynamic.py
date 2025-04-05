@@ -4,6 +4,7 @@ import pickle
 import json
 import os
 import random
+from typing import Optional
 
 from Core.Graph.BaseGraph import BaseGraph
 from Core.Schema.ChunkSchema import TextChunk
@@ -11,13 +12,93 @@ from Core.Common.Logger import logger
 from Core.Index.EmbeddingFactory import get_rag_embedding
 from Core.Prompt.RaptorPrompt import SUMMARIZE
 from Core.Storage.TreeGraphStorage import TreeGraphStorage
-from Core.Schema.TreeSchema import TreeNode
+from Core.Schema.TreeSchema import TreeNode, TreeSchema
+from Core.Storage.NameSpace import Workspace
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict, deque
 from typing import List, Set, Tuple, Dict, Any
 from pathlib import Path
 
 Embedding = List[float]
+
+# from TreeNode
+class DynTreeNodeAux():
+    def __init__(self, index: int, layer: int,  parent: Optional[int] = None, update_flag: bool = False, valid_flag: bool = True):    
+        self.index = index
+        self.parent = parent
+        self.layer = layer
+        self.update_flag = update_flag        
+        self.valid_flag = valid_flag
+
+
+class DynAux:
+    # 辅助类，基于DynTreeNodeAux
+    def __init__(self, workspace, shape: Tuple[int, int], Force: bool=False):
+        self.workspace = workspace
+        self.ns_clustering = workspace.make_for("ns_clustering")
+        # self.signature_file = self.ns_clustering.get_save_path("signature.npy")
+        # self.hyperplane_file = self.ns_clustering.get_save_path("hyperplanes.npy")
+        self.signature_file = "/ssddata/zhengjun/Dataset_tests/signature.npy"
+        self.hyperplane_file = "/ssddata/zhengjun/Dataset_tests/hyperplanes.npy"
+
+        if (Force):
+            # delete the files signature and hyperplane
+            # 删除 signature.npy 文件
+            if os.path.exists(self.signature_file):
+                os.remove(self.signature_file)
+
+            # 删除 hyperplanes.npy 文件
+            if os.path.exists(self.hyperplane_file):
+                os.remove(self.hyperplane_file)
+
+        self.NodeAux = []
+        self.signature_map = {}
+        self.hyperplanes = self.get_hyperplanes(shape)
+        self.affected_entities = set()
+        self.deleted_clusters = set()
+
+
+    def save_hyperplanes(self, hyperplanes: np.ndarray):
+        np.save(self.hyperplane_file, hyperplanes)
+
+    def load_hyperplanes(self):
+        if os.path.exists(self.hyperplane_file):
+            self.hyperplanes = np.load(self.hyperplane_file)
+            return True
+        return False
+
+    def get_hyperplanes(self, shape: Tuple[int, int], force: bool = False):
+        if os.path.exists(self.hyperplane_file) and not force:
+            hp =  np.load(self.hyperplane_file)
+        else:
+            hp = np.random.randn(*shape)
+            np.save(self.hyperplane_file, hp)
+        return hp
+    
+    def init_tree_aux(self,  tree: TreeSchema):
+        self.NodeAux = [DynTreeNodeAux(node.index, node.children) for node in tree.all_nodes]
+        for layer in tree.layer_to_nodes: 
+            layer_index = tree.layer_to_nodes.index(layer)
+            for node in layer:
+                self.NodeAux[node.index].layer = layer_index
+                for child in node.children or []:
+                    self.NodeAux[child].parent = node.index
+    
+    def add_node_aux(self, node: TreeNode, layer: int):
+        self.NodeAux.append(DynTreeNodeAux(node.index, layer))
+        assert len(self.NodeAux) == node.index + 1, "NodeAux index is not equal to node index"
+
+    def update_children(self, node_index: int, children: set[int]):
+        if children is None:
+            return
+        for child in children:
+            self.NodeAux[child].parent = node_index
+    
+    def set_parent(self, node_index: int, parent_index: int):
+        self.NodeAux[node_index].parent = parent_index
+
+    def set_valid_flag(self, node_index: int, valid_flag: bool):
+        self.NodeAux[node_index].valid_flag = valid_flag
 
 class TreeGraphDynamic(BaseGraph):
     max_workers: int = 16
@@ -28,49 +109,10 @@ class TreeGraphDynamic(BaseGraph):
         self.embedding_model = get_rag_embedding(config.embedding.api_type, config)  # Embedding model
         self.config = config.graph # Only keep the graph config
         random.seed(self.config.random_seed)
+        self.workspace = Workspace(config.working_dir, config.exp_name)  # 初始化 workspace
 
-        # clustering_dir = Path(self.workspace.make_for("clustering_stage"))
-        ns_clusering = self.workspace.make_for("ns_clustering")
-        # self.embedding_path = clustering_dir / "embeddings.npy"
-        self.embedding_path = ns_clusering.get_saved_path("embeddings.npy")
-        # self.bucket_path = clustering_dir / "bucket_ids.pkl"
-        self.bucket_path = ns_clusering.get_saved_path("bucket_ids.pkl")
-        # self.hyperplane_path = clustering_dir / "hyperplanes.npy"
-        self.hyperplane_path = ns_clusering.get_saved_path("hyperplanes.npy")
-
-
-    def _save_embeddings(self):
-        np.save(self.embedding_path, self.embedding_cache)
-
-    def _save_bucket_map(self):
-        with open(self.bucket_path, "wb") as f:
-            pickle.dump(self.bucket_map, f)
-
-    def _save_hyperplanes(self, hyperplanes: np.ndarray):
-        np.save(self.hyperplane_path, hyperplanes)
-
-    def _load_bucket_map(self):
-        if self.bucket_path.exists():
-            with open(self.bucket_path, "rb") as f:
-                return pickle.load(f)
-        return {}
-
-    def _load_embeddings(self):
-        if self.embedding_path.exists():
-            return np.load(self.embedding_path, allow_pickle=True).item()
-        return {}
-
-    def _load_hyperplanes(self):
-        if self.hyperplane_path.exists():
-            return np.load(self.hyperplane_path)
-        raise FileNotFoundError(f"Unfound file: {self.hyperplane_path}")
-
-    def _clear_previous_clustering_files(self):
-        for path in [self.embedding_path, self.bucket_path, self.hyperplane_path]:
-            if path.exists():
-                path.unlink()
-                logger.info(f"🗑️ Unfound file:{path}")
-
+        hyperplane_shape = (self.config.num_hyperplanes, config.embedding.dimensions)
+        self.aux = DynAux(self.workspace, hyperplane_shape, False)
 
     def _create_task_for(self, func):
         def _pool_func(**params):
@@ -88,96 +130,89 @@ class TreeGraphDynamic(BaseGraph):
             loop.close()
             return result
         return _pool_func
+    
+    def _compute_signature(self, vec):
+        projections = np.dot(vec, self.aux.hyperplanes.T)
+        binary_hash = (projections > 0).astype(int)
+        return int(''.join(map(str, binary_hash)), 2)
+
+
+    def _analyze_bucket_distribution(self, buckets):
+        size_counts = defaultdict(int)
+        total_items = 0
+        
+        for items in buckets.values():
+            size = len(items)
+            size_counts[size] += 1
+            total_items += size
+        
+        if not size_counts:
+                return {}
+    
+        sorted_sizes = sorted(size_counts.items())
+
+        return {
+            'total_buckets': len(buckets),
+            'size_distribution': dict(sorted_sizes),
+            'max_size': max(size_counts.keys()) if size_counts else 0,
+            'min_size': min(size_counts.keys()) if size_counts else 0,
+            'avg_size': round(total_items / len(buckets), 2) if buckets else 0
+        }
+
+    def _print_bucket_stats(self, buckets, clusters):
+        stats = self._analyze_bucket_distribution(buckets)
+        print("\n=== LSH Bucket Distribution Analysis ===")
+        print(f"Total Buckets: {stats['total_buckets']}")
+        print(f"Biggest Buckets: {stats['max_size']} Elements")
+        print(f"Smallest Buckets: {stats['min_size']} Elemants")
+        print(f"Average Size: {stats['avg_size']} Elements")
+        print("\nBucket Size:")
+        print(f"{'Size':<8} | {'Count':<8} | {'Percntage':<10}")
+        cumulative = 0
+        total = stats['total_buckets']
+        for size, count in stats['size_distribution'].items():
+            percent = count / total * 100
+            cumulative += percent
+            print(f"{size:<8} | {count:<8} | {cumulative:>8.1f}%")
+                # Check point for each layer of clustering
+        print("\n=== Clustering Result ===")
+        print(f"Total Clusters: {len(clusters)}")
+        sizes = [len(c) for c in clusters]
+        print(f"Cluster Distribution: Biggest {max(sizes)}, Smallest {min(sizes)}, Average {np.mean(sizes):.1f}")
+
 
     # hyper plain realization
     async def _perform_clustering(
-        self, embeddings: np.ndarray, refine: bool = False
+        self, nodes: List[TreeNode], refine: bool = False
     ) -> List[np.ndarray]:
-        
+        # Get the embeddings from the nodes
+        embeddings = np.array([node.embedding for node in nodes])
+        node_ids = np.array([node.index for node in nodes])
         n_samples = embeddings.shape[0]
         logger.info("Perform Clustering: n_samples = {n_samples}".format(n_samples=n_samples))
 
         # Defined in GraphConfig.py
         num_hyperplanes = self.config.num_hyperplanes
-        min_size = self.config.lower_limit
-        max_size = self.config.upper_limit
+        min_size = self.config.avg_size
+        max_size = self.config.avg_size
 
         # Clear current temporary files
-        self._clear_previous_clustering_files()
+        # self._clear_previous_clustering_files()
 
         # Data Preprocessing
         embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
         n_samples, dim = embeddings.shape
 
-        # Generate hash function
-        if refine:
-            hyperplanes = self._load_hyperplanes()
-        else:
-            hyperplanes = np.random.randn(num_hyperplanes, dim)
-            self._save_hyperplanes(hyperplanes)
-            logger.info(f"✅ Hyperplanes saved.")
-
-        def get_bucket_id(vec):
-            projections = np.dot(vec, hyperplanes.T)
-            binary_hash = (projections > 0).astype(int)
-            return int(''.join(map(str, binary_hash)), 2)
-        
-        def analyze_bucket_distribution(buckets):
-            size_counts = defaultdict(int)
-            total_items = 0
-            
-            for items in buckets.values():
-                size = len(items)
-                size_counts[size] += 1
-                total_items += size
-            
-            if not size_counts:
-                 return {}
-        
-            sorted_sizes = sorted(size_counts.items())
-
-            return {
-                'total_buckets': len(buckets),
-                'size_distribution': dict(sorted_sizes),
-                'max_size': max(size_counts.keys()) if size_counts else 0,
-                'min_size': min(size_counts.keys()) if size_counts else 0,
-                'avg_size': round(total_items / len(buckets), 2) if buckets else 0
-            }
-
-
-        # See the stat of each layer of bucketing
-        def print_bucket_stats(buckets):
-            stats = analyze_bucket_distribution(buckets)
-            print("\n=== LSH Bucket Distribution Analysis ===")
-            print(f"Total Buckets: {stats['total_buckets']}")
-            print(f"Biggest Buckets: {stats['max_size']} Elements")
-            print(f"Smallest Buckets: {stats['min_size']} Elemants")
-            print(f"Average Size: {stats['avg_size']} Elements")
-            print("\nBucket Size:")
-            print(f"{'Size':<8} | {'Count':<8} | {'Percntage':<10}")
-            cumulative = 0
-            total = stats['total_buckets']
-            for size, count in stats['size_distribution'].items():
-                percent = count / total * 100
-                cumulative += percent
-                print(f"{size:<8} | {count:<8} | {cumulative:>8.1f}%")
-                    # Check point for each layer of clustering
-            print("\n=== Clustering Result ===")
-            print(f"Total Clusters: {len(clusters)}")
-            sizes = [len(c) for c in clusters]
-            print(f"Cluster Distribution: Biggest {max(sizes)}, Smallest {min(sizes)}, Average {np.mean(sizes):.1f}")
+        # 验证dim的维度和hyperplanes的维度是否一致
+        assert dim == self.aux.hyperplanes.shape[1], "Dim is not equal to hyperplane shape"
 
         # Create initial hash bucket
         buckets = defaultdict(list)
 
         for idx, vec in enumerate(embeddings):
-            bucket_id = get_bucket_id(vec)
-
-            # Save current bucket info & embedding
-            # Todo: 此处逻辑会多次调用（5层封顶），每一层bucket ID都储存在同一个文件该怎么进行读取和后续操作？
-            self.embedding_cache[idx] = vec
-            self.bucket_map[idx] = bucket_id
-            buckets[bucket_id].append(idx)
+            signature = self._compute_signature(vec)
+            self.aux.signature_map[node_ids[idx]] = signature
+            buckets[signature].append(idx)
         
         # Process buckets -> Generate final clusters
         sorted_buckets = sorted(buckets.items(), key=lambda x: x[0])
@@ -215,7 +250,7 @@ class TreeGraphDynamic(BaseGraph):
             clusters.append(current_cluster)
         
         # Print bucket distribution
-        print_bucket_stats(buckets)
+        self._print_bucket_stats(buckets, clusters)
 
         # Turn cluster result into easy to process labels
         for cluster_id, cluster in enumerate(clusters):
@@ -223,12 +258,6 @@ class TreeGraphDynamic(BaseGraph):
                 labels_map[idx] = cluster_id
         labels = np.array([labels_map.get(i, -1) for i in range(n_samples)])
         
-        #  Save hyperplane, embedding and bucket data
-        self._save_hyperplanes(hyperplanes)
-        self._save_embeddings()
-        self._save_bucket_map()
-        logger.info("✅ hyperplanes, embedding and bucket map saved")
-
         return labels
 
 
@@ -237,28 +266,17 @@ class TreeGraphDynamic(BaseGraph):
             self, nodes: List[TreeNode], refine: bool = False
         ) -> List[List[TreeNode]]:
         
-        # Get the embeddings from the nodes
-        embeddings = np.array([node.embedding for node in nodes])
         # Perform the clustering
-        clusters = await self._perform_clustering(embeddings, refine)
+        clusters = await self._perform_clustering(nodes, refine)
         unique_values, inverse_indices = np.unique(clusters, return_inverse=True)
         sorted_indices = np.argsort(inverse_indices)
         clustered_indices = np.split(sorted_indices, np.cumsum(np.bincount(inverse_indices))[:-1])
         node_clusters = [[nodes[i] for i in cluster] for cluster in clustered_indices]
 
         return node_clusters
-
+    
     def _embed_text(self, text: str):
         return self.embedding_model._get_text_embedding(text)
-
-    async def _create_node(self, layer: int, text: str, children_indices: Set[int] = None):
-        embedding = self._embed_text(text)
-        node_id = self._graph.num_nodes  # Give it an index
-        logger.info(
-            "Create node_id = {node_id}, children = {children}".format(node_id=node_id, children=children_indices))
-        return self._graph.upsert_node(node_id=node_id,
-                                       node_data={"layer": layer, "text": text, "children": children_indices,
-                                                  "embedding": embedding})
 
     async def _extract_entity_relationship(self, chunk_key_pair: tuple[str, TextChunk]) -> TreeNode:
         # Build a leaf node from a text chunk
@@ -266,19 +284,17 @@ class TreeGraphDynamic(BaseGraph):
         leaf_node = await self._create_node(0, chunk_info.content)
         return leaf_node
 
-    async def _extract_cluster_relationship(self, layer: int, cluster: List[TreeNode]) -> TreeNode:
-        # Build a non-leaf node from a cluster of nodes
-        summarized_text = await self._summarize_from_cluster(cluster, self.config.summarization_length)
-        parent_node = await self._create_node(layer, summarized_text, {node.index for node in cluster})
-        return parent_node
-
     async def _create_node_without_embedding(self, layer: int, text: str, children_indices: Set[int] = None):
         # embedding = self._embed_text(text)
         logger.info(
-            "Create node_id = unassigned, children = {children}".format(node_id=0, children=children_indices))
-        return self._graph.upsert_node(node_id=0,
+            "Create node_id = {node_id}, children = {children}".format(node_id=self._graph.num_nodes, children=children_indices))
+        new_node = self._graph.upsert_node(node_id=self._graph.num_nodes,
                                        node_data={"layer": layer, "text": text, "children": children_indices,
-                                                  "embedding": []})
+                                                  "embedding": None, "parent": None})
+        self.aux.add_node_aux(new_node, layer)
+        # 更新children的父亲
+        self.aux.update_children(new_node.index, children_indices)
+        return new_node
 
     async def _extract_entity_relationship_without_embedding(self, chunk_key_pair: tuple[str, TextChunk]) -> TreeNode:
         # Build a leaf node from a text chunk
@@ -286,6 +302,12 @@ class TreeGraphDynamic(BaseGraph):
         leaf_node = await self._create_node_without_embedding(0, chunk_info.content)
         return leaf_node
 
+    async def _create_entity_node_without_embedding(self, chunk_key_pair: tuple[str, TextChunk]) -> TreeNode:
+        # Build a leaf node from a text chunk
+        chunk_key, chunk_info = chunk_key_pair
+        leaf_node = await self._create_node_without_embedding(0, chunk_info.content)
+        return leaf_node
+    
     async def _extract_cluster_relationship_without_embedding(self, layer: int, cluster: List[TreeNode]) -> TreeNode:
         # Build a non-leaf node from a cluster of nodes
         summarized_text = await self._summarize_from_cluster(cluster, self.config.summarization_length)
@@ -298,21 +320,18 @@ class TreeGraphDynamic(BaseGraph):
         content = SUMMARIZE.format(context=node_texts)
         return await self.llm.aask(content, max_tokens=summarization_length)
 
-    async def _batch_embed_and_assign(self, layer):
+    async def _process_layer_embeddings_and_indices(self, layer):
         current_layer = self._graph.get_layer(layer)
         texts = [node.text for node in current_layer]
 
         embeddings = self.embedding_model._get_text_embeddings(texts)
         start_id = self._graph.get_node_num() - len(self._graph.get_layer(layer))
         for i in range(start_id, len(self._graph.nodes)):
-            self._graph.nodes[i].id = i
             self._graph.nodes[i].embedding = embeddings[i - start_id]
         for node, embedding in zip(self._graph.get_layer(layer), embeddings):
-            node.embeddings = embedding
-            node.index = start_id
+            node.embedding = embedding
             start_id += 1
-
-
+    
     # Build logic
     async def _build_tree_from_leaves(self):
         for layer in range(self.config.num_layers):  # build a new layer
@@ -330,38 +349,288 @@ class TreeGraphDynamic(BaseGraph):
                     as_completed(cluster_tasks)
 
             logger.info("To batch embed current layer")
-            await self._batch_embed_and_assign(self._graph.num_layers - 1)
+            await self._process_layer_embeddings_and_indices(self._graph.num_layers - 1)
 
             logger.info("Layer: {layer}".format(layer=layer))
 
         logger.info(self._graph.num_layers)
 
-    # Refine logic
-    async def _refine_tree_from_leaves(self):
-        for layer in range(self.config.num_layers):  # build a new layer
+    async def _split_node(self, node_index: int):
+        logger.info("split node: {node_index} with num of children: {children_num}".format(node_index=node_index, children_num=len(self._graph.nodes[node_index].children)))
+        node = self._graph.nodes[node_index]
+        children = node.children
+        # split the children into multiple parts
+        num_parts = (len(children)-self.config.lower_limit) // self.config.avg_size + 1
+        signatures = [(self.aux.signature_map[child], child) for child in children]
+        # sort the signatures by signature
+        signatures.sort(key=lambda x: x[0])
+        # split the signatures into multiple parts
+        signatures_parts = np.array_split(signatures, num_parts)
+        # create new nodes for each part
+
+        # the first part is the original node
+        new_children = [self._graph.nodes[child] for signature, child in signatures_parts[0]]
+        # children is a set of children index
+        node.children = {child.index for child in new_children}
+        # 暂不update text
+        node.text = ""
+        # 设置子节点的parent
+        self.aux.update_children(node.index, node.children)
+        self._remove_a_child_from_parent(node.index)
+        self.aux.affected_entities.add(node.index)
+
+        current_layer_index = self.aux.NodeAux[node.index].layer
+        assert current_layer_index is not None, "Current layer index is None"
+
+        for signatures_part in signatures_parts[1:]:
+            new_children = {self._graph.nodes[child] for signature, child in signatures_part}
+            new_node = await self._create_node_without_embedding(current_layer_index, "", {child.index for child in new_children})
+            assert new_node.index !=0 , "New node index is 0"
+            self.aux.affected_entities.add(new_node.index)
+
+    def _set_node_invalid(self, node_index: int):
+        node = self._graph.nodes[node_index]
+        node.text = ""
+        node.embedding = None
+        node.children = set()
+        self.aux.set_valid_flag(node.index, False)
+        if self.aux.NodeAux[node_index].parent is not None:
+            parent_index = self.aux.NodeAux[node_index].parent
+            self._graph.nodes[parent_index].children.remove(node_index)
+
+        
+    def _merge_node(self, node_index: int, node_index_to_merge: int):
+        logger.info("merge node: {node_index} and {node_index_to_merge}".format(node_index=node_index, node_index_to_merge=node_index_to_merge))
+        node = self._graph.nodes[node_index]
+        node_to_merge = self._graph.nodes[node_index_to_merge]
+        children = node.children
+
+        # 将node_to_merge的children加入到node中
+        assert len(node.children) + len(node_to_merge.children) <= self.config.upper_limit, "Merge node will exceed the upper limit"
+        for child in node_to_merge.children:
+            node.children.add(child)
+
+        # 从父节点中移除node_to_merge
+        self.aux.update_children(node.index, node_to_merge.children)
+        self._set_node_invalid(node_index_to_merge)
+
+        node.text = ""
+        node.embedding = None
+
+        self.aux.affected_entities.add(node.index)
+        self.aux.affected_entities.add(node_to_merge.index)
+
+    async def _split_or_merge(self, layer: int):
+        if layer == 0:
+            return
+
+        # 移除空节点
+        self._remove_empty_cluster(layer)
+
+        current_layer = self._graph.get_layer(layer)
+        node_ids = [node.index for node in current_layer]
+
+        for index in range(len(node_ids)):
+            if len(self._graph.nodes[node_ids[index]].children) > self.config.upper_limit:
+                await self._split_node(node_ids[index])
+            elif len(self._graph.nodes[node_ids[index]].children) < self.config.lower_limit:
+                if index > 0:
+                    # 处理第一个元素的情况
+                    if len(self._graph.nodes[node_ids[index - 1]].children) + len(self._graph.nodes[node_ids[index]].children) <= self.config.upper_limit:
+                        self._merge_node(node_ids[index - 1], node_ids[index])
+                        self._remove_empty_cluster(layer)
+
+
+
+    def _remove_a_child_from_parent(self, node_index: int):
+        node_aux = self.aux.NodeAux[node_index]
+        if node_aux.parent is not None:
+            logger.info("node_aux.parent: {parent}".format(parent=node_aux.parent))
+            self._graph.nodes[node_aux.parent].children.remove(node_index)
+            self.aux.affected_entities.add(node_aux.parent)
+            node_aux.parent = None
+
+    def _remove_empty_cluster(self, layer: int):
+        current_layer = self._graph.get_layer(layer)
+        new_current_layer = []
+        for node in current_layer:
+            if len(node.children) != 0:
+                new_current_layer.append(node)
+            else:
+                self._remove_a_child_from_parent(node.index)
+        self._graph.replace_layer(layer, new_current_layer)
+
+    async def _refine_one_layer(self, layer: int):
+        # 处理当前层，可能需要合并或者分裂
+        logger.info("refine layer: {layer}".format(layer=layer))
+        if layer != 0:
+            # output the total number of nodes in the layer
+            total_children = 0
+            for node in self._graph.get_layer(layer):
+                if node.children is not None:
+                    total_children += len(node.children)
+            logger.info("total children: {total_children}".format(total_children=total_children))
+            
+            await self._split_or_merge(layer)
+        # 加log
+        
+
+        current_layer_nodes = self._graph.get_layer(layer)
+
+        # 需要重新处理当前层的affected entities
+        current_layer_affected_entities = []
+        for node in current_layer_nodes:
+            # 找出当前层中需要重新处理的节点
+            if node.index in self.aux.affected_entities and self.aux.NodeAux[node.index].valid_flag:
+                logger.info("affected node.index: {node_index}".format(node_index=node.index))
+                node.embedding = None
+                current_layer_affected_entities.append(node.index)
+                # 如果节点有父亲，则将其从父亲中移除
+                self._remove_a_child_from_parent(node.index)
+        # 记录当前影响的长度
+        logger.info("len of current affected entities: {length}".format(length=len(current_layer_affected_entities)))
+
+        if len(current_layer_affected_entities) == 0:
+            return 
+            
+        if layer != 0:
+            # 如果当前层不是第一层，则更新当前层的affected entities的text
+            for node_index in current_layer_affected_entities:
+                logger.info("current summarize node_index: {node_index}".format(node_index=node_index))
+                current_node = self._graph.nodes[node_index]
+                children_list = [self._graph.nodes[child] for child in current_node.children]
+                logger.info("len of children_list: {children_list}".format(children_list=len(children_list)))
+                current_node.text = await self._summarize_from_cluster(children_list, self.config.summarization_length)
+                # output the text of the new node
+                logger.info("new node text: {text}".format(text=current_node.text))
+
+        # 更新当前层的embedding
+        texts = [self._graph.nodes[node_index].text for node_index in current_layer_affected_entities]
+        logger.info("len of texts: {length}".format(length=len(texts)))
+        embeddings = self.embedding_model._get_text_embeddings(texts)
+        for node_id, embedding in zip(current_layer_affected_entities, embeddings):
+            self._graph.nodes[node_id].embedding = embedding
+
+        # 更新sigature signature is a list of tuple (signature, node_index)
+        current_layer_signatures = []
+        for node in current_layer_nodes:
+            if node.index not in self.aux.signature_map:
+                self.aux.signature_map[node.index] = self._compute_signature(node.embedding)
+            current_layer_signatures.append((self.aux.signature_map[node.index], node.index))
+        logger.info("len of current layer signatures: {length}".format(length=len(current_layer_signatures)))
+
+
+        # 如果当前层是最后一层，则不需要更新cluster
+        if layer == self._graph.num_layers - 1:
+            if len(current_layer_nodes) < self.config.upper_limit or layer  == self.config.num_layers - 1:
+                return
+            else:
+                # 如果当前层是最后一层，则需要更新新建一个node
+                self._graph.add_layer()
+                await self._create_node_without_embedding(layer+1, "", {node.index for node in current_layer_nodes})
+
+      
+        
+        # sort the signatures by signature
+        current_layer_signatures.sort(key=lambda x: x[0])
+
+        # display the signatures
+        if layer != 0:
+            logger.info("current layer signatures: {signatures}".format(signatures=current_layer_signatures))
+
+        # need to index in the list of signatures
+        next_layer = self._graph.get_layer(layer + 1)
+        parent_idx = next_layer[0].index
+        assert parent_idx != None, "First parent is None"
+
+        # 新的entry已经插入，并聚类到更上一层的cluster
+        record_parent_idx = []
+        for idx, (signature, node_index) in enumerate(current_layer_signatures):
+            # record the parent index, even if the parent is None
+            record_parent_idx.append(self.aux.NodeAux[node_index].parent)
+            if self.aux.NodeAux[node_index].parent is not None:
+                parent_idx = self.aux.NodeAux[node_index].parent
+                continue
+
+            self.aux.NodeAux[node_index].parent = parent_idx
+            self._graph.nodes[parent_idx].children.add(node_index)
+            self.aux.affected_entities.add(parent_idx)
+        
+        # 输出父亲list
+        logger.info("record_parent_idx: {record_parent_idx}".format(record_parent_idx=record_parent_idx))
+
+    def _reorder_node_id(self):
+        new_node_id = 0
+        new_order_map = {}
+        
+        # 首先创建映射，只包含有效的节点
+        for node in self._graph.nodes:
+            if node.embedding is not None:
+                new_order_map[node.index] = new_node_id
+                new_node_id = new_node_id + 1
+    
+        # 然后只处理有效的节点
+        new_all_nodes = []
+        for node in self._graph.nodes:
+            if node.index in new_order_map:  # 检查节点是否在映射中
+                node.index = new_order_map[node.index]
+                if node.children is not None:
+                    new_children = set()
+                    for child in node.children:
+                        if child in new_order_map:  # 检查子节点是否在映射中
+                            new_children.add(new_order_map[child])
+                    node.children = new_children
+                new_all_nodes.append(node)
+            else:
+                assert node.embedding is None, "Node embedding is not None"
+        logger.info("len of new_all_nodes: {length}".format(length=len(new_all_nodes)))
+        logger.info("len of original nodes: {length}".format(length=len(self._graph.nodes)))
+        self._graph._tree.all_nodes = new_all_nodes
+
+    # Add information to the tree given the additional dynamic chunks
+    async def _refine_graph(self, new_chunks: List[Any]): 
+        # Todo: 每次load数据集不同则名字不同
+        is_tree_load = await self._graph.load_full_tree_graph()
+        
+        assert is_tree_load == True, "No existing tree for insertion mode!"
+        self.aux.init_tree_aux(self._graph._tree)
+        assert len(new_chunks) > 0, "No new chunks to insert!"
+
+        # new_chunks = new_chunks[:10]
+
+        # 直接遍历处理每个 chunk
+        for chunk in new_chunks:
+            new_node = await self._create_entity_node_without_embedding(chunk_key_pair=chunk)
+            parent_idx = self.aux.NodeAux[new_node.index].parent
+            logger.info("new_node.parent: {parent}".format(parent=parent_idx))
+            assert new_node.index != 0, "New node index is 0" 
+            self.aux.affected_entities.add(new_node.index)
+
+        assert len(self.aux.affected_entities) == len(new_chunks), "Affected entities size is not equal to new chunks size"
+
+        logger.info(f"Refining graph with {len(new_chunks)} new chunks")
+        for layer in range(self._graph.num_layers):  # build a new layer
             logger.info("length of layer: {length}".format(length=len(self._graph.get_layer(layer))))
-            if len(self._graph.get_layer(layer)) <= self.config.reduction_dimension + 1:
-                break
+            await self._refine_one_layer(layer)
+            for node in self._graph.get_layer(layer):
+                assert node.embedding is not None, "Node embedding is None"
 
-            self._graph.add_layer()
+        self._reorder_node_id()
+                
+    async def _batch_embed_and_assign(self, layer):
+        current_layer = self._graph.get_layer(layer)
+        texts = [node.text for node in current_layer]
 
-            clusters = await self._clustering(nodes = self._graph.get_layer(layer), refine = True)
+        embeddings = self.embedding_model._get_text_embeddings(texts)
+        start_id = self._graph.get_node_num() - len(self._graph.get_layer(layer))
+        for i in range(start_id, len(self._graph.nodes)):
+            self._graph.nodes[i].id = i
+            self._graph.nodes[i].embedding = embeddings[i - start_id]
+        for node, embedding in zip(self._graph.get_layer(layer), embeddings):
+            node.embeddings = embedding
+            node.index = start_id
+            start_id += 1
 
-            with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-                for i in range(0, self.max_workers):
-                    cluster_tasks = [pool.submit(self._create_task_for(self._extract_cluster_relationship_without_embedding), layer = layer + 1, cluster = cluster) for (j, cluster) in enumerate(clusters) if j % self.max_workers == i]
-                    as_completed(cluster_tasks)
-
-            logger.info("To batch embed current layer")
-            await self._batch_embed_and_assign(self._graph.num_layers - 1)
-
-
-            logger.info("Layer: {layer}".format(layer=layer))
-
-        logger.info(self._graph.num_layers)
-
-
-    # Construct the graph from scratch
     async def _build_graph(self, chunks: List[Any]):
         is_load = await self._graph.load_tree_graph_from_leaves()
         if is_load:
@@ -370,37 +639,22 @@ class TreeGraphDynamic(BaseGraph):
             self._graph.clear()  # clear the storage before rebuilding
             self._graph.add_layer()
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+                # leaf_tasks = []
+                # for index, chunk in enumerate(chunks):
+                #     logger.info(index)
+                #     leaf_tasks.append(pool.submit(self._create_task_for(self._extract_entity_relationship), chunk_key_pair=chunk))
                 for i in range(0, self.max_workers):
                     leaf_tasks = [pool.submit(self._create_task_for(self._extract_entity_relationship_without_embedding), chunk_key_pair=chunk) for index, chunk in enumerate(chunks) if index % self.max_workers == i]
                     as_completed(leaf_tasks)
+                    # time.sleep(2)
             logger.info(len(chunks))
             logger.info(f"To batch embed leaves")
             await self._batch_embed_and_assign(self._graph.num_layers - 1)
             logger.info(f"Created {len(self._graph.leaf_nodes)} Leaf Embeddings")
             await self._graph.write_tree_leaves()
         await self._build_tree_from_leaves()
-    
-    # Add information to the tree given the additional dynamic chunks
-    async def _refine_graph(self, new_chunks: List[Any]):
-        # Todo: 每次load数据集不同则名字不同
-        is_load = await self._graph.load_full_tree_graph()
-        
-        if is_load:
-            # 📓 Todo: 本模块有待测试
-            logger.info(f"Loaded {len(self._graph.leaf_nodes)} Leaf Embeddings")
-            logger.info(f"Appending {len(new_chunks)} new chunks to existing leaf layer")
 
-            # Load new chunk embeddings into self._graph
-            await self._batch_embed_and_assign(self._graph.num_layers - 1)
-            await self._graph.write_tree_leaves()
 
-        else:
-            logger.error(f"No existing tree for insertion mode!")
-
-        logger.info(f"Refining graph with {len(new_chunks)} new chunks")
-        await self._refine_tree_from_leaves()
-
-        
     @property
     def entity_metakey(self):
         return "index"
