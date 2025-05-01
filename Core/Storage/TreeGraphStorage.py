@@ -11,14 +11,22 @@ import pickle
 class TreeGraphStorage(BaseGraphStorage):
     def __init__(self):
         super().__init__()
+        self.external_tree_path = None
 
     name: str = "tree_data.pkl"
     _tree: TreeSchema = TreeSchema()
+
+    def set_external_tree_path(self, path: [str]):
+            """Set an external path to load the tree from"""
+            self.external_tree_path = path
+            if path:
+                logger.info(f"Set external tree path to: {path}")
 
     def clear(self):
         self._tree = TreeSchema()
 
     async def _persist(self, force):
+        target_path = self.external_tree_path if self.external_tree_path else self.tree_pkl_file
         if (os.path.exists(self.tree_pkl_file) and not force):
             return
         logger.info(f"Writing graph into {self.tree_pkl_file}")
@@ -30,17 +38,23 @@ class TreeGraphStorage(BaseGraphStorage):
 
     async def load_tree_graph(self, force) -> bool:
         # Attempting to load the graph from the specified pkl file
-        logger.info(f"Attempting to load the tree from: {self.tree_pkl_file}")
+        if force:
+            logger.info("Force flag is set. Rebuilding tree from scratch.")
+            return False
+
+        load_path = self.external_tree_path if self.external_tree_path else self.tree_pkl_file
+        logger.info(f"Attempting to load the tree from: {load_path}")
+
         if os.path.exists(self.tree_pkl_file):
             try:
-                with open(self.tree_pkl_file, "rb") as file:
+                with open(load_path, "rb") as file:
                     self._tree = pickle.load(file)
                 logger.info(
-                    f"Successfully loaded tree from: {self.tree_pkl_file} with {len(self._tree.all_nodes)} nodes and {self._tree.num_layers} layers")
+                    f"Successfully loaded tree from: {load_path} with {len(self._tree.all_nodes)} nodes and {self._tree.num_layers} layers")
                 return True
             except Exception as e:
                 logger.error(
-                    f"Failed to load tree from: {self.tree_pkl_file} with {e}! Need to re-build the tree.")
+                    f"Failed to load tree from: {load_path} with {e}! Need to re-build the tree.")
                 return False
         else:
             # Pkl file doesn't exist; need to construct the tree from scratch
@@ -48,21 +62,28 @@ class TreeGraphStorage(BaseGraphStorage):
             return False
 
     async def write_tree_leaves(self):
+        target_path = self.external_tree_path if self.external_tree_path else self.tree_leaves_pkl_file
         TreeGraphStorage.write_tree_graph(tree=self.tree, tree_pkl_file=self.tree_leaves_pkl_file)
     
     async def load_tree_graph_from_leaves(self, force = False) -> bool:
         # Attempting to load the graph from the specified pkl file
-        logger.info(f"Attempting to load the tree leaves from: {self.tree_leaves_pkl_file}")
-        if os.path.exists(self.tree_leaves_pkl_file):
+        if force:
+            logger.info("Force flag is set. Rebuilding tree from scratch.")
+            return False
+
+        load_path = self.external_tree_path if self.external_tree_path else self.tree_leaves_pkl_file
+        logger.info(f"Attempting to load the tree leaves from: {load_path}")
+
+        if os.path.exists(load_path):
             try:
-                with open(self.tree_leaves_pkl_file, "rb") as file:
+                with open(load_path, "rb") as file:
                     self._tree = pickle.load(file)
                 logger.info(
-                    f"Successfully loaded tree from: {self.tree_leaves_pkl_file} with {len(self._tree.leaf_nodes)} leaves")
+                    f"Successfully loaded tree from: {load_path} with {len(self._tree.leaf_nodes)} leaves")
                 return True
             except Exception as e:
                 logger.error(
-                    f"Failed to load tree from: {self.tree_leaves_pkl_file} with {e}! Need to re-build the tree.")
+                    f"Failed to load tree from: {load_path} with {e}! Need to re-build the tree.")
                 return False
         else:
             # Pkl file doesn't exist; need to construct the tree from scratch
@@ -71,16 +92,22 @@ class TreeGraphStorage(BaseGraphStorage):
         
     async def load_full_tree_graph(self, force: bool = False) -> bool:
 
-        logger.info(f"Attempting to load the full tree from: {self.tree_pkl_file}")
+        if force:
+            logger.info("Force flag is set. Rebuilding tree from scratch.")
+            return False
+
+        load_path = self.external_tree_path if self.external_tree_path else self.tree_pkl_file
+
+        logger.info(f"Attempting to load the full tree from: {load_path}")
         
-        if os.path.exists(self.tree_pkl_file):
+        if os.path.exists(load_path):
             try:
-                with open(self.tree_pkl_file, "rb") as f:
+                with open(load_path, "rb") as f:
                     self._tree = pickle.load(f)
                 logger.info(f"Successfully loaded full tree with {len(self._tree.leaf_nodes)} leaves and {self._tree.num_layers} layers.")
                 return True
             except Exception as e:
-                logger.error(f"Failed to load full tree from: {self.tree_pkl_file} - {e}")
+                logger.error(f"Failed to load full tree from: {load_path} - {e}")
                 return False
         else:
             logger.warning("Full tree file does not exist. Need to build from scratch.")

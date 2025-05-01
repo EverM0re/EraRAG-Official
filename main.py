@@ -9,7 +9,12 @@ from Data.QueryDataset import RAGQueryDataset
 import pandas as pd
 from Core.Utils.Evaluation import Evaluator
 
-
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-opt", type=str, help="Path to option YMAL file.")
+    parser.add_argument("-dataset_name", type=str, help="Name of the dataset.")
+    parser.add_argument("-external_tree", type=str, help="Path to external tree file to load from.")
+    return parser.parse_args()
 
 def check_dirs(opt):
     # For each query, save the results in a separate directory
@@ -28,12 +33,11 @@ def check_dirs(opt):
     copyfile(basic_name, os.path.join(config_dir, "Config2.yaml"))
     return result_dir
 
-
 def wrapper_query(query_dataset, digimon, result_dir):
     all_res = []
 
     dataset_len = len(query_dataset)
-    dataset_len = 100
+    dataset_len = 2500
     
     for _, i in enumerate(range(dataset_len)):
         query = query_dataset[i]
@@ -46,24 +50,23 @@ def wrapper_query(query_dataset, digimon, result_dir):
     all_res_df.to_json(save_path, orient="records", lines=True)
     return save_path
 
-
 async def wrapper_evaluation(path, opt, result_dir):
-     eval = Evaluator(path, opt.dataset_name)
-     res_dict = await eval.evaluate()
-     save_path = os.path.join(result_dir, "metrics.json")
-     with open(save_path, "w") as f:
-         f.write(str(res_dict))
+    eval = Evaluator(path, opt.dataset_name)
+    res_dict = await eval.evaluate()
+    save_path = os.path.join(result_dir, "metrics.json")
+    with open(save_path, "w") as f:
+        f.write(str(res_dict))
 
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-opt", type=str, help="Path to option YMAL file.")
-    parser.add_argument("-dataset_name", type=str, help="Name of the dataset.")
-    args = parser.parse_args()
-
+    args = parse_args()
+    
     opt = Config.parse(Path(args.opt), dataset_name=args.dataset_name)
     digimon = GraphRAG(config=opt)
     result_dir = check_dirs(opt)
+
+    # Set external tree path if specified
+    if args.external_tree and args.external_tree.strip():
+        digimon.graph._graph.set_external_tree_path(args.external_tree.strip())
 
     query_dataset = RAGQueryDataset(
         data_dir=os.path.join(opt.data_root, opt.dataset_name)
@@ -74,4 +77,4 @@ if __name__ == "__main__":
 
     save_path = wrapper_query(query_dataset, digimon, result_dir)
 
-    asyncio.run(wrapper_evaluation(save_path, opt, result_dir))
+    asyncio.run(wrapper_evaluation(save_path, opt, result_dir)) 

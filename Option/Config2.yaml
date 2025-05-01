@@ -2,10 +2,13 @@ llm:
   # api_type: "openai"
   # model: 'gpt-3.5-turbo'
   api_type: "open_llm"
-  #model: 'TA/meta-llama/Llama-3-8b-chat-hf'
-  model: 'TA/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'
-  base_url: "https://cfcus02.opapi.win/v1"  # or forward url / other llm url
-  api_key: "sk-SL2TWFYq97803d15F1D5T3BlbKFJ9dCf90F93b374a52839a"
+  # model: 'TA/meta-llama/Llama-3-8b-chat-hf'
+  # model: 'TA/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'
+  model: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'
+  # base_url: "https://cfcus02.opapi.win/v1" # openai
+  base_url: "https://api.deepinfra.com/v1/openai"  # deepinfra
+  api_key: "t9skWj10JE2lgysayJWuiHDTIqjlSzaC" # deepinfra
+  # api_key: "sk-SL2TWFYq97803d15F1D5T3BlbKFJ9dCf90F93b374a52839a" # openai
 
 embedding:
   api_type: "hf"  # or  ollama / etc.
@@ -24,5 +27,7 @@ embedding:
  
 data_root: /ssddata/zhengjun/GraphRAG-master/Data # Root directory for data
 
-working_dir: /ssddata/zhengjun/Dataset_tests # Result directory for the experiment
+working_dir: /ssddata/zhengjun/Dynamic_test # Result directory for the experiment
 exp_name: tree_graph # Experiment name
+
+external_tree_path: null

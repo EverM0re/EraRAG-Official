@@ -22,7 +22,7 @@ class WorkingParams(BaseModel):
     exp_name: str = ""
     data_root: str = ""
     dataset_name: str = ""
-
+    external_tree_path: Optional[str] = None
 
 class Config(WorkingParams, YamlModel):
     """Configurations for our project"""

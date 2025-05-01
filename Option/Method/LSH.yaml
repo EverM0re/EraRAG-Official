@@ -7,7 +7,6 @@ use_entity_link_chunk: False  # Only set True for HippoRAG and FastGraphRAG
 enable_graph_augmentation: False
 
 # Data
-
 index_name: tree_graph_lsh
 vdb_type: faiss  # vector/colbert
 
