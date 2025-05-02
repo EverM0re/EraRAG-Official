@@ -14,23 +14,27 @@ def parse_args():
     parser.add_argument("-opt", type=str, help="Path to option YMAL file.")
     parser.add_argument("-dataset_name", type=str, help="Name of the dataset.")
     parser.add_argument("-external_tree", type=str, help="Path to external tree file to load from.")
+    parser.add_argument("-root", type=str, default="", help="Root directory to prefix result/config/metric paths.")
+    parser.add_argument("-query", type=str, default="0", help="Whether to run query and evaluation (1 to enable).")
     return parser.parse_args()
 
-def check_dirs(opt):
-    # For each query, save the results in a separate directory
-    result_dir = os.path.join(opt.working_dir, opt.exp_name, "Results")
-    # Save the current used config in a separate directory
-    config_dir = os.path.join(opt.working_dir, opt.exp_name, "Configs")
-    # Save the metrics of entire experiment in a separate directory
-    metric_dir = os.path.join(opt.working_dir, opt.exp_name, "Metrics")
+def check_dirs(opt, root):
+    base_dir = os.path.join(opt.working_dir, opt.exp_name, root) if root else os.path.join(opt.working_dir, opt.exp_name)
+
+    result_dir = os.path.join(base_dir, "Results")
+    config_dir = os.path.join(base_dir, "Configs")
+    metric_dir = os.path.join(base_dir, "Metrics")
+
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(config_dir, exist_ok=True)
     os.makedirs(metric_dir, exist_ok=True)
+
     opt_name = args.opt[args.opt.rindex("/") + 1 :]
     basic_name = os.path.join(args.opt.split("/")[0], "Config2.yaml")
-    
+
     copyfile(args.opt, os.path.join(config_dir, opt_name))
     copyfile(basic_name, os.path.join(config_dir, "Config2.yaml"))
+
     return result_dir
 
 def wrapper_query(query_dataset, digimon, result_dir):
@@ -38,7 +42,7 @@ def wrapper_query(query_dataset, digimon, result_dir):
 
     dataset_len = len(query_dataset)
     dataset_len = 2500
-    
+
     for _, i in enumerate(range(dataset_len)):
         query = query_dataset[i]
         res = asyncio.run(digimon.query(query["question"]))
@@ -59,12 +63,11 @@ async def wrapper_evaluation(path, opt, result_dir):
 
 if __name__ == "__main__":
     args = parse_args()
-    
+
     opt = Config.parse(Path(args.opt), dataset_name=args.dataset_name)
     digimon = GraphRAG(config=opt)
-    result_dir = check_dirs(opt)
+    result_dir = check_dirs(opt, args.root)
 
-    # Set external tree path if specified
     if args.external_tree and args.external_tree.strip():
         digimon.graph._graph.set_external_tree_path(args.external_tree.strip())
 
@@ -75,6 +78,6 @@ if __name__ == "__main__":
 
     asyncio.run(digimon.insert(corpus))
 
-    save_path = wrapper_query(query_dataset, digimon, result_dir)
-
-    asyncio.run(wrapper_evaluation(save_path, opt, result_dir)) 
+    if args.query == "1":
+        save_path = wrapper_query(query_dataset, digimon, result_dir)
+        asyncio.run(wrapper_evaluation(save_path, opt, result_dir))

@@ -17,7 +17,7 @@ class BasicQuery(BaseQuery):
                                                                    mode="vdb")
 
         entities_context, relations_context, text_units_context, communities_context = None, None, None, None
-        if self.config.use_global_query and self.config.use_community:
+        if self.config.use_global_query and self.config.use_community_info:
             return await self._retrieve_relevant_contexts_global(query)
         if self.config.use_keywords and self.config.use_global_query:
             entities_context, relations_context, text_units_context = await self._retrieve_relevant_contexts_global_keywords(
@@ -65,7 +65,7 @@ class BasicQuery(BaseQuery):
 
         node_datas = await self._retriever.retrieve_relevant_content(seed=query, type=Retriever.ENTITY, mode="vdb")
 
-        if self.config.use_communiy_info:
+        if self.config.use_community_info:
             use_communities = await self._retriever.retrieve_relevant_content(seed=node_datas, type=Retriever.COMMUNITY,
                                                                               mode="from_entity")
         use_relations = await self._retriever.retrieve_relevant_content(seed=node_datas, type=Retriever.RELATION,

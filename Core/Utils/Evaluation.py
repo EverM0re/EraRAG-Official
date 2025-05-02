@@ -15,9 +15,8 @@ from rouge_score import rouge_scorer, scoring
 from Option.Config2 import default_config
 from Core.Provider.BaseLLM import BaseLLM
 from Core.Provider.LLMProviderRegister import create_llm_instance
-import logging
+from Core.Common.Logger import logger
 
-logger = logging.getLogger(__name__)
 
 # Path to your downloaded tokenizer
 nltk_path = "/ssddata/zhengjun/NLTK"

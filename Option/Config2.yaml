@@ -28,6 +28,6 @@ embedding:
 data_root: /ssddata/zhengjun/GraphRAG-master/Data # Root directory for data
 
 working_dir: /ssddata/zhengjun/Dynamic_test # Result directory for the experiment
-exp_name: tree_graph # Experiment name
+exp_name: Cross-Model # Experiment name
 
 external_tree_path: null

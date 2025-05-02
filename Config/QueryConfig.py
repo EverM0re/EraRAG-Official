@@ -14,7 +14,7 @@ class QueryConfig(YamlModel):
     # naive search
     naive_max_token_for_text_unit: int = 12000
     use_keywords: bool = False
-    use_communiy_info: bool = False
+    use_community_info: bool = False
     # local search
     
     enable_local: bool = False
