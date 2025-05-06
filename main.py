@@ -41,7 +41,7 @@ def wrapper_query(query_dataset, digimon, result_dir):
     all_res = []
 
     dataset_len = len(query_dataset)
-    dataset_len = 2500
+    dataset_len = 2555
 
     for _, i in enumerate(range(dataset_len)):
         query = query_dataset[i]

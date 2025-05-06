@@ -49,90 +49,6 @@ class TreeGraphBalanced(BaseGraph):
             return result
         return _pool_func
 
-    # # Cluster method: LSH
-    # async def _perform_clustering(
-    #     self, embeddings: np.ndarray
-    # ) -> List[np.ndarray]:
-
-    #     n_samples = embeddings.shape[0]
-    #     logger.info("Perform Clustering using LSH: n_samples = {n_samples}".format(n_samples=n_samples))
-
-    #     lsh = MinHashLSH(threshold=self.config.lsh_threshold, num_perm=self.config.lsh_num_perm)
-    #     minhashes = []
-        
-    #     # Compute MinHash for each sample and insert to LSH
-    #     for i in range(n_samples):
-    #         mh = MinHash(num_perm=self.config.lsh_num_perm)
-    #         for value in embeddings[i]:
-    #             mh.update(str(value).encode('utf8'))
-    #         lsh.insert(str(i), mh)
-    #         minhashes.append((i, mh))
-
-    #     # Clustering based on hash buckets
-    #     clusters = defaultdict(list)
-    #     assigned = set()
-
-    #     for i, mh in minhashes:
-    #         if i in assigned:
-    #             continue
-    #         bucket = lsh.query(mh)  # locate similar samples
-    #         cluster_id = len(clusters)
-    #         clusters[cluster_id] = bucket
-    #         assigned.update(bucket)
-
-    #     small_buckets = []
-    #     large_buckets = []
-    #     refined_clusters = defaultdict(list)
-
-    #     # buckets size: 5-50
-    #     for cluster_id, points in clusters.items():
-    #         if len(points) < 5:
-    #             small_buckets.append((cluster_id, points))  
-    #         elif len(points) > 50:
-    #             large_buckets.append((cluster_id, points))  
-    #         else:
-    #             refined_clusters[cluster_id] = points
-
-    #     # small buckets will be absorbed by neighboring buckets
-    #     for cluster_id, points in small_buckets:
-    #         best_match = None
-    #         best_distance = float('inf')
-
-    #         for other_cluster_id, cluster_points in refined_clusters.items():
-    #             centroid = np.mean([embeddings[int(p)] for p in cluster_points], axis=0)
-    #             distance = np.linalg.norm(np.mean([embeddings[int(p)] for p in points], axis=0) - centroid)
-    #             if distance < best_distance:
-    #                 best_distance = distance
-    #                 best_match = other_cluster_id
-
-    #         if best_match is not None:
-    #             refined_clusters[best_match].extend(points)
-    #         else:
-    #             refined_clusters[len(refined_clusters)] = points
-
-    #     # large buckets will be split into 2 by k-means
-    #     for cluster_id, points in large_buckets:
-    #         cluster_embeddings = np.array([embeddings[int(p)] for p in points])
-
-    #         kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
-    #         labels = kmeans.fit_predict(cluster_embeddings)
-
-    #         cluster_1 = [points[i] for i in range(len(points)) if labels[i] == 0]
-    #         cluster_2 = [points[i] for i in range(len(points)) if labels[i] == 1]
-
-    #         refined_clusters[len(refined_clusters)] = cluster_1
-    #         refined_clusters[len(refined_clusters)] = cluster_2
-
-    #     # label generation
-    #     labels = np.full(n_samples, -1, dtype=int)
-    #     for cluster_id, points in refined_clusters.items():
-    #         for p in points:
-    #             labels[int(p)] = cluster_id  
-
-    #     return labels
-    # #----------------------------------------------
-
-
     # Cluster method: KMeans
     async def _perform_clustering(
         self, embeddings: np.ndarray
@@ -296,14 +212,9 @@ class TreeGraphBalanced(BaseGraph):
             self._graph.clear()  # clear the storage before rebuilding
             self._graph.add_layer()
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-                # leaf_tasks = []
-                # for index, chunk in enumerate(chunks):
-                #     logger.info(index)
-                #     leaf_tasks.append(pool.submit(self._create_task_for(self._extract_entity_relationship), chunk_key_pair=chunk))
                 for i in range(0, self.max_workers):
                     leaf_tasks = [pool.submit(self._create_task_for(self._extract_entity_relationship_without_embedding), chunk_key_pair=chunk) for index, chunk in enumerate(chunks) if index % self.max_workers == i]
                     as_completed(leaf_tasks)
-                    # time.sleep(2)
             logger.info(len(chunks))
             logger.info(f"To batch embed leaves")
             await self._batch_embed_and_assign(self._graph.num_layers - 1)

@@ -48,9 +48,9 @@ class GraphConfig(YamlModel):
     size_of_clusters: int = 10
 
     # LSH clustering config
-    upper_limit: int = 15
+    upper_limit: int = 12
     avg_size: int = 10
-    lower_limit: int = 5
+    lower_limit: int = 8
     num_hyperplanes: int = 20
 
     # For graph augmentation

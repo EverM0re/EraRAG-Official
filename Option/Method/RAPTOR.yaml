@@ -8,7 +8,7 @@ enable_graph_augmentation: False
 
 # Data
 
-index_name: tree_graph_balanced
+index_name: raptor
 vdb_type: faiss  # vector/colbert
 
 # Chunk Config 
@@ -22,12 +22,12 @@ chunk:
 graph:
   # enable LightRAG
     enable_edge_keywords: False
-    graph_type: tree_graph_balanced 
-    force: False # Whether we enforce a tree rebuild
+    graph_type: tree_graph
+    force: True # Whether we enforce a tree rebuild
     add: False # Whether this corpus given is regared as a addition
 
     # Tree Config
-    build_tree_from_leaves: True
+    build_tree_from_leaves: False
     reduction_dimension: 10
     summarization_length: 100
     num_layers:  5 # For RAPTOR

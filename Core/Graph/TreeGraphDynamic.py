@@ -411,6 +411,7 @@ class TreeGraphDynamic(BaseGraph):
             node.children.add(child)
         # 从父节点中移除node_to_merge
         self.aux.update_children(node.index, node_to_merge.children)
+        self._remove_a_child_from_parent(node_index_to_merge)
         self._set_node_invalid(node_index_to_merge)
         node.text = ""
         node.embedding = None
@@ -435,7 +436,7 @@ class TreeGraphDynamic(BaseGraph):
                     # 处理第一个元素的情况
                     if len(self._graph.nodes[node_ids[index - 1]].children) + len(self._graph.nodes[node_ids[index]].children) <= self.config.upper_limit:
                         self._merge_node(node_ids[index - 1], node_ids[index])
-                        # self._remove_empty_cluster(layer)
+                        self._remove_empty_cluster(layer)
 
     def _remove_a_child_from_parent(self, node_index: int):
         node_aux = self.aux.NodeAux[node_index]
@@ -585,6 +586,7 @@ class TreeGraphDynamic(BaseGraph):
         self.aux.init_tree_aux(self._graph._tree)
         assert len(new_chunks) > 0, "No new chunks to insert!"
 
+        # 测试用
         # new_chunks = new_chunks[:10]
 
         # 直接遍历处理每个 chunk
@@ -635,10 +637,6 @@ class TreeGraphDynamic(BaseGraph):
         self._graph.clear()  # clear the storage before rebuilding
         self._graph.add_layer()
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-            # leaf_tasks = []
-            # for index, chunk in enumerate(chunks):
-            #     logger.info(index)
-            #     leaf_tasks.append(pool.submit(self._create_task_for(self._extract_entity_relationship), chunk_key_pair=chunk))
             for i in range(0, self.max_workers):
                 leaf_tasks = [pool.submit(self._create_task_for(self._extract_entity_relationship_without_embedding), chunk_key_pair=chunk) for index, chunk in enumerate(chunks) if index % self.max_workers == i]
                 as_completed(leaf_tasks)

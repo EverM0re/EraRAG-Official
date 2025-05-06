@@ -24,7 +24,7 @@ graph:
   # enable LightRAG
     enable_edge_keywords: True
     graph_type: rkg_graph # rkg_graph/er_graph/tree_graph/passage_graph
-    force: False
+    force: True
     # Building graph
     extract_two_step: True
     max_gleaning: 1

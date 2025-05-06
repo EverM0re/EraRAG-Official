@@ -6,6 +6,7 @@ from typing import Dict, Any, List
 
 import os
 import pickle
+import shutil
 
 
 class TreeGraphStorage(BaseGraphStorage):
@@ -26,7 +27,7 @@ class TreeGraphStorage(BaseGraphStorage):
         self._tree = TreeSchema()
 
     async def _persist(self, force):
-        target_path = self.external_tree_path if self.external_tree_path else self.tree_pkl_file
+        # target_path = self.external_tree_path if self.external_tree_path else self.tree_pkl_file
         if (os.path.exists(self.tree_pkl_file) and not force):
             return
         logger.info(f"Writing graph into {self.tree_pkl_file}")
@@ -91,19 +92,27 @@ class TreeGraphStorage(BaseGraphStorage):
             return False
         
     async def load_full_tree_graph(self, force: bool = False) -> bool:
-
         if force:
             logger.info("Force flag is set. Rebuilding tree from scratch.")
             return False
 
         load_path = self.external_tree_path if self.external_tree_path else self.tree_pkl_file
-
         logger.info(f"Attempting to load the full tree from: {load_path}")
         
         if os.path.exists(load_path):
             try:
+                # 加载树
                 with open(load_path, "rb") as f:
                     self._tree = pickle.load(f)
+                
+                # 如果是从external_tree_path加载的，复制到本地路径
+                if self.external_tree_path and self.external_tree_path != self.tree_pkl_file:
+                    # 确保目标目录存在
+                    os.makedirs(os.path.dirname(self.tree_pkl_file), exist_ok=True)
+                    # 复制文件
+                    shutil.copy2(self.external_tree_path, self.tree_pkl_file)
+                    logger.info(f"Copied external tree from {self.external_tree_path} to {self.tree_pkl_file}")
+                
                 logger.info(f"Successfully loaded full tree with {len(self._tree.leaf_nodes)} leaves and {self._tree.num_layers} layers.")
                 return True
             except Exception as e:

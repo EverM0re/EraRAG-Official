@@ -44,7 +44,7 @@ class BaseGraph(ABC):
         # Make dynamic alterations to the tree
         if add:
             await self._refine_graph(chunks)
-            await self._persist_graph(force)
+            await self._persist_graph(add)
             logger.info("✅ Finished adding additional info to the tree")
         
         # Rebuild the tree from scratch
@@ -66,14 +66,12 @@ class BaseGraph(ABC):
     def namespace(self):
         return None
 
-    # TODO: Try to rewrite here, not now
     @namespace.setter
     def namespace(self, namespace):
         self._graph.namespace = namespace
 
     @property
     def entity_metakey(self):
-        # For almost of graph, entity_metakey is "entity_name"
         return "entity_name"
 
     async def _merge_nodes_then_upsert(self, entity_name: str, nodes_data: List[Entity]):
@@ -170,14 +168,11 @@ class BaseGraph(ABC):
     @abstractmethod
     def _build_graph(self, chunks):
         """
-        Abstract method to build the graph based on the input chunks.
-
-        Args:
-            chunks: The input data chunks used to build the graph.
-
-        This method should be implemented by subclasses to define how the graph is built from the input chunks.
+        Builds the graph from scratch using the input chunks.
+        This method should be implemented by subclasses.
         """
         pass
+
 
     async def augment_graph_by_similarity_search(self, entity_vdb, duplicate=False):
         logger.info("Starting augment the existing graph with similariy edges")
