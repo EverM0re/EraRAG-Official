@@ -25,7 +25,7 @@ embedding:
   embed_batch_size: 128
   embedding_func_max_async: 16
  
-data_root: /ssddata/zhengjun/new_dataset # Root directory for data
+data_root: /ssddata/zhengjun/quality_test # Root directory for data
 
 working_dir: /ssddata/zhengjun/Dynamic_test # Result directory for the experiment
 exp_name: Cross-Model # Experiment name

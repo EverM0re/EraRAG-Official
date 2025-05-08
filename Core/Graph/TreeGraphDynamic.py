@@ -5,19 +5,20 @@ import json
 import os
 import random
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import defaultdict, deque
+from typing import List, Set, Tuple, Dict, Any
+from pathlib import Path
 
 from Core.Graph.BaseGraph import BaseGraph
 from Core.Schema.ChunkSchema import TextChunk
 from Core.Common.Logger import logger
 from Core.Index.EmbeddingFactory import get_rag_embedding
-from Core.Prompt.RaptorPrompt import SUMMARIZE
+from Core.Prompt.DynamicPrompt import SUMMARIZE, RESUMMARIZE
 from Core.Storage.TreeGraphStorage import TreeGraphStorage
 from Core.Schema.TreeSchema import TreeNode, TreeSchema
 from Core.Storage.NameSpace import Workspace
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from collections import defaultdict, deque
-from typing import List, Set, Tuple, Dict, Any
-from pathlib import Path
+
 
 Embedding = List[float]
 
@@ -36,8 +37,6 @@ class DynAux:
     def __init__(self, workspace, shape: Tuple[int, int], Force: bool=False):
         self.workspace = workspace
         self.ns_clustering = workspace.make_for("ns_clustering")
-        # self.signature_file = self.ns_clustering.get_save_path("signature.npy")
-        # self.hyperplane_file = self.ns_clustering.get_save_path("hyperplanes.npy")
         self.signature_file = "/ssddata/zhengjun/Dynamic_test/signature.npy"
         self.hyperplane_file = "/ssddata/zhengjun/Dynamic_test/hyperplanes.npy"
 
@@ -71,7 +70,7 @@ class DynAux:
         else:
             hp = np.random.randn(*shape)
             np.save(self.hyperplane_file, hp)
-            logger.info("\n⚠️ No existing hyperplane! Regenerated hyperplane!")
+            logger.info("\n❌ No existing hyperplane! Regenerated hyperplane!")
         return hp
     
     def init_tree_aux(self, tree: TreeSchema):
@@ -294,7 +293,6 @@ class TreeGraphDynamic(BaseGraph):
                                        node_data={"layer": layer, "text": text, "children": children_indices,
                                                   "embedding": None, "parent": None})
         self.aux.add_node_aux(new_node, layer)
-        # 更新children的父亲
         self.aux.update_children(new_node.index, children_indices)
         return new_node
 
@@ -320,6 +318,12 @@ class TreeGraphDynamic(BaseGraph):
         # Give a summarization from a cluster of nodes
         node_texts = f"\n\n".join([' '.join(node.text.splitlines()) for node in node_list])
         content = SUMMARIZE.format(context=node_texts)
+        return await self.llm.aask(content, max_tokens=summarization_length)
+
+    async def _resummarize_from_cluster(self, node_list: List[TreeNode], summarization_length=150) -> str:
+        # Give a summarization from a given cluster and a added node
+        node_texts = f"\n\n".join([' '.join(node.text.splitlines()) for node in node_list])
+        content = RESUMMARIZE.format(context=node_texts)
         return await self.llm.aask(content, max_tokens=summarization_length)
 
     async def _process_layer_embeddings_and_indices(self, layer):
@@ -465,7 +469,7 @@ class TreeGraphDynamic(BaseGraph):
                 if node.children is not None:
                     total_children += len(node.children)
             logger.info("total children: {total_children}".format(total_children=total_children))
-            
+            # Split or merge nodes in current layer
             await self._split_or_merge(layer)
 
         current_layer_nodes = self._graph.get_layer(layer)
@@ -473,12 +477,12 @@ class TreeGraphDynamic(BaseGraph):
         # 需要重新处理当前层的affected entities
         current_layer_affected_entities = []
         for node in current_layer_nodes:
-            # 找出当前层中需要重新处理的节点
+            # find affected entities in current layer
             if node.index in self.aux.affected_entities and self.aux.NodeAux[node.index].valid_flag:
                 logger.info("affected node.index: {node_index}".format(node_index=node.index))
                 node.embedding = None
                 current_layer_affected_entities.append(node.index)
-                # 如果节点有父亲，则将其从父亲中移除
+                # If node has parent, remove it from parent
                 self._remove_a_child_from_parent(node.index)
         # Record current affected length
         logger.info("len of current affected entities: {length}".format(length=len(current_layer_affected_entities)))
@@ -494,10 +498,10 @@ class TreeGraphDynamic(BaseGraph):
                 children_list = [self._graph.nodes[child] for child in current_node.children]
                 logger.info("len of children_list: {children_list}".format(children_list=len(children_list)))
                 current_node.text = await self._summarize_from_cluster(children_list, self.config.summarization_length)
-                # output the text of the new node
+                # Print the text of the new node for checking
                 logger.info("new node text: {text}".format(text=current_node.text))
 
-        # update embedding
+        # Update embedding
         texts = [self._graph.nodes[node_index].text for node_index in current_layer_affected_entities]
         logger.info("len of texts: {length}".format(length=len(texts)))
         embeddings = self.embedding_model._get_text_embeddings(texts)
@@ -514,12 +518,13 @@ class TreeGraphDynamic(BaseGraph):
         logger.info("len of current layer signatures: {length}".format(length=len(current_layer_signatures)))
 
 
-        # 如果当前层是最后一层，则不需要更新cluster
+        # If reach top layer
         if layer == self._graph.num_layers - 1:
+            # If current layer has less than upper limit or reach the max layer, unable to resummary and return
             if len(current_layer_nodes) < self.config.upper_limit or layer  == self.config.num_layers - 1:
                 return
             else:
-                # 如果当前层是最后一层，则需要更新新建一个node
+                # Else create new layer and resummary
                 self._graph.add_layer()
                 await self._create_node_without_embedding(layer+1, "", {node.index for node in current_layer_nodes})
 
@@ -586,10 +591,7 @@ class TreeGraphDynamic(BaseGraph):
         self.aux.init_tree_aux(self._graph._tree)
         assert len(new_chunks) > 0, "No new chunks to insert!"
 
-        # 测试用
-        # new_chunks = new_chunks[:10]
-
-        # 直接遍历处理每个 chunk
+        # Process each chunk directly
         for chunk in new_chunks:
             new_node = await self._create_entity_node_without_embedding(chunk_key_pair=chunk)
             parent_idx = self.aux.NodeAux[new_node.index].parent
