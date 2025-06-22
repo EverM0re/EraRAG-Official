@@ -9,12 +9,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict, deque
 from typing import List, Set, Tuple, Dict, Any
 from pathlib import Path
+import time
 
 from Core.Graph.BaseGraph import BaseGraph
 from Core.Schema.ChunkSchema import TextChunk
 from Core.Common.Logger import logger
 from Core.Index.EmbeddingFactory import get_rag_embedding
-from Core.Prompt.DynamicPrompt import SUMMARIZE, RESUMMARIZE
+from Core.Prompt.DynamicPrompt import SUMMARIZE
 from Core.Storage.TreeGraphStorage import TreeGraphStorage
 from Core.Schema.TreeSchema import TreeNode, TreeSchema
 from Core.Storage.NameSpace import Workspace
@@ -37,8 +38,8 @@ class DynAux:
     def __init__(self, workspace, shape: Tuple[int, int], Force: bool=False):
         self.workspace = workspace
         self.ns_clustering = workspace.make_for("ns_clustering")
-        self.signature_file = "/ssddata/zhengjun/Dynamic_test/signature.npy"
-        self.hyperplane_file = "/ssddata/zhengjun/Dynamic_test/hyperplanes.npy"
+        self.signature_file = "Your Signature File"
+        self.hyperplane_file = "Your Hyperplane File"
 
         # if reset the tree, delete the signature and hyperplane files
         if (Force):
@@ -130,8 +131,6 @@ class TreeGraphDynamic(BaseGraph):
         return _pool_func
     
     def _compute_signature(self, vec):
-        # logger.info(f"vec type: {type(vec)}, vec: {vec}")
-        # logger.info(f"hyperplanes type: {type(self.aux.hyperplanes)}, shape: {self.aux.hyperplanes.shape if self.aux.hyperplanes is not None else 'None'}")
         projections = np.dot(vec, self.aux.hyperplanes.T)
         binary_hash = (projections > 0).astype(int)
         return int(''.join(map(str, binary_hash)), 2)
@@ -159,27 +158,27 @@ class TreeGraphDynamic(BaseGraph):
             'avg_size': round(total_items / len(buckets), 2) if buckets else 0
         }
 
-    def _print_bucket_stats(self, buckets, clusters):
-        stats = self._analyze_bucket_distribution(buckets)
-        logger.info("\n=== LSH Bucket Distribution Analysis ===")
-        logger.info(f"Total Buckets: {stats['total_buckets']}")
-        logger.info(f"Biggest Buckets: {stats['max_size']} Elements")
-        logger.info(f"Smallest Buckets: {stats['min_size']} Elements")
-        logger.info(f"Average Size: {stats['avg_size']} Elements")
-        logger.info("\nBucket Size:")
-        logger.info(f"{'Size':<8} | {'Count':<8} | {'Percentage':<10}")
-        cumulative = 0
-        total = stats['total_buckets']
-        for size, count in stats['size_distribution'].items():
-            percent = count / total * 100
-            cumulative += percent
-            logger.info(f"{size:<8} | {count:<8} | {cumulative:>8.1f}%")
+    # def _print_bucket_stats(self, buckets, clusters):
+    #     stats = self._analyze_bucket_distribution(buckets)
+    #     logger.info("\n=== LSH Bucket Distribution Analysis ===")
+    #     logger.info(f"Total Buckets: {stats['total_buckets']}")
+    #     logger.info(f"Biggest Buckets: {stats['max_size']} Elements")
+    #     logger.info(f"Smallest Buckets: {stats['min_size']} Elements")
+    #     logger.info(f"Average Size: {stats['avg_size']} Elements")
+    #     logger.info("\nBucket Size:")
+    #     logger.info(f"{'Size':<8} | {'Count':<8} | {'Percentage':<10}")
+    #     cumulative = 0
+    #     total = stats['total_buckets']
+    #     for size, count in stats['size_distribution'].items():
+    #         percent = count / total * 100
+    #         cumulative += percent
+    #         logger.info(f"{size:<8} | {count:<8} | {cumulative:>8.1f}%")
         
-        # Check point for each layer of clustering
-        logger.info("\n=== Clustering Result ===")
-        logger.info(f"Total Clusters: {len(clusters)}")
-        sizes = [len(c) for c in clusters]
-        logger.info(f"Cluster Distribution: Biggest {max(sizes)}, Smallest {min(sizes)}, Average {np.mean(sizes):.1f}")
+    #     # Check point for each layer of clustering
+    #     logger.info("\n=== Clustering Result ===")
+    #     logger.info(f"Total Clusters: {len(clusters)}")
+    #     sizes = [len(c) for c in clusters]
+    #     logger.info(f"Cluster Distribution: Biggest {max(sizes)}, Smallest {min(sizes)}, Average {np.mean(sizes):.1f}")
 
 
     # hyper plain realization
@@ -197,14 +196,11 @@ class TreeGraphDynamic(BaseGraph):
         min_size = self.config.lower_limit
         max_size = self.config.upper_limit
 
-        # Clear current temporary files
-        # self._clear_previous_clustering_files()
-
         # Data Preprocessing
         embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
         n_samples, dim = embeddings.shape
 
-        # 验证dim的维度和hyperplanes的维度是否一致
+        # Dimension check
         assert dim == self.aux.hyperplanes.shape[1], "Dim is not equal to hyperplane shape"
 
         # Create initial hash bucket
@@ -286,7 +282,6 @@ class TreeGraphDynamic(BaseGraph):
         return leaf_node
 
     async def _create_node_without_embedding(self, layer: int, text: str, children_indices: Set[int] = None):
-        # embedding = self._embed_text(text)
         logger.info(
             "Create node_id = {node_id}, children = {children}".format(node_id=self._graph.num_nodes, children=children_indices))
         new_node = self._graph.upsert_node(node_id=self._graph.num_nodes,
@@ -317,7 +312,7 @@ class TreeGraphDynamic(BaseGraph):
     async def _summarize_from_cluster(self, node_list: List[TreeNode], summarization_length=150) -> str:
         # Give a summarization from a cluster of nodes
         node_texts = f"\n\n".join([' '.join(node.text.splitlines()) for node in node_list])
-        content = SUMMARIZE.format(context=node_texts)
+        content = SUMMARIZE.format(context=node_texts, max_tokens=summarization_length)
         return await self.llm.aask(content, max_tokens=summarization_length)
 
     async def _resummarize_from_cluster(self, node_list: List[TreeNode], summarization_length=150) -> str:
@@ -378,6 +373,7 @@ class TreeGraphDynamic(BaseGraph):
         node.children = {child.index for child in new_children}
         # Not updating text now
         node.text = ""
+        node.embedding = None
         # Set parent
         self.aux.update_children(node.index, node.children)
         self._remove_a_child_from_parent(node.index)
@@ -409,11 +405,10 @@ class TreeGraphDynamic(BaseGraph):
         node_to_merge = self._graph.nodes[node_index_to_merge]
         children = node.children
 
-        # 将node_to_merge的children加入到node中
         assert len(node.children) + len(node_to_merge.children) <= self.config.upper_limit, "Merge node will exceed the upper limit"
         for child in node_to_merge.children:
             node.children.add(child)
-        # 从父节点中移除node_to_merge
+        # remove node_to_merge from parent
         self.aux.update_children(node.index, node_to_merge.children)
         self._remove_a_child_from_parent(node_index_to_merge)
         self._set_node_invalid(node_index_to_merge)
@@ -427,7 +422,6 @@ class TreeGraphDynamic(BaseGraph):
     async def _split_or_merge(self, layer: int):
         if layer == 0:
             return
-        # 移除空节点
         self._remove_empty_cluster(layer)
         current_layer = self._graph.get_layer(layer)
         node_ids = [node.index for node in current_layer]
@@ -437,7 +431,6 @@ class TreeGraphDynamic(BaseGraph):
                 await self._split_node(node_ids[index])
             elif len(self._graph.nodes[node_ids[index]].children) < self.config.lower_limit:
                 if index > 0:
-                    # 处理第一个元素的情况
                     if len(self._graph.nodes[node_ids[index - 1]].children) + len(self._graph.nodes[node_ids[index]].children) <= self.config.upper_limit:
                         self._merge_node(node_ids[index - 1], node_ids[index])
                         self._remove_empty_cluster(layer)
@@ -461,6 +454,8 @@ class TreeGraphDynamic(BaseGraph):
         self._graph.replace_layer(layer, new_current_layer)
 
     async def _refine_one_layer(self, layer: int):
+        start_time1 = time.time()
+        
         logger.info("refine layer: {layer}".format(layer=layer))
         if layer != 0:
             # output the total number of nodes in the layer
@@ -472,9 +467,12 @@ class TreeGraphDynamic(BaseGraph):
             # Split or merge nodes in current layer
             await self._split_or_merge(layer)
 
+        end_time1 = time.time()
+        logger.info(f"✅Layer {layer} split&merge completed in {end_time1 - start_time1:.2f} seconds")
+
         current_layer_nodes = self._graph.get_layer(layer)
 
-        # 需要重新处理当前层的affected entities
+        # Deal with affected entities
         current_layer_affected_entities = []
         for node in current_layer_nodes:
             # find affected entities in current layer
@@ -490,24 +488,49 @@ class TreeGraphDynamic(BaseGraph):
         if len(current_layer_affected_entities) == 0:
             return 
             
+        start_time2 = time.time()
         if layer != 0:
-            # If not first layer, resummary
-            for node_index in current_layer_affected_entities:
-                logger.info("current summarize node_index: {node_index}".format(node_index=node_index))
-                current_node = self._graph.nodes[node_index]
-                children_list = [self._graph.nodes[child] for child in current_node.children]
-                logger.info("len of children_list: {children_list}".format(children_list=len(children_list)))
-                current_node.text = await self._summarize_from_cluster(children_list, self.config.summarization_length)
-                # Print the text of the new node for checking
-                logger.info("new node text: {text}".format(text=current_node.text))
-
+            # If not first layer, resummary using concurrent execution
+            with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+                for i in range(0, self.max_workers):
+                    summary_tasks = []
+                    for j, node_index in enumerate(current_layer_affected_entities):
+                        if j % self.max_workers == i:
+                            current_node = self._graph.nodes[node_index]
+                            children_list = [self._graph.nodes[child] for child in current_node.children]
+                            logger.info(f"Processing node {node_index} with {len(children_list)} children")
+                            # Create task for summarization
+                            task = pool.submit(
+                                self._create_task_with_return(self._summarize_from_cluster),
+                                node_list=children_list,
+                                summarization_length=self.config.summarization_length
+                            )
+                            summary_tasks.append((node_index, task))
+                    
+                    # Wait for tasks to complete and update node texts
+                    for node_index, task in summary_tasks:
+                        try:
+                            summary_text = task.result()
+                            self._graph.nodes[node_index].text = summary_text
+                            logger.info(f"Updated summary for node {node_index}")
+                        except Exception as e:
+                            logger.error(f"Failed to summarize node {node_index}: {e}")
+        
+        end_time2 = time.time()
+        logger.info(f"✅Layer {layer} resummarize completed in {end_time2 - start_time2:.2f} seconds")
+        
+        start_time3 = time.time()
         # Update embedding
         texts = [self._graph.nodes[node_index].text for node_index in current_layer_affected_entities]
         logger.info("len of texts: {length}".format(length=len(texts)))
         embeddings = self.embedding_model._get_text_embeddings(texts)
         for node_id, embedding in zip(current_layer_affected_entities, embeddings):
             self._graph.nodes[node_id].embedding = embedding
+        end_time3 = time.time()
+        logger.info(f"✅Layer {layer} embedding_update completed in {end_time3 - start_time3:.2f} seconds")
 
+
+        start_time4 = time.time()
         # Update signature
         current_layer_signatures = []
         for node in current_layer_nodes:
@@ -516,6 +539,8 @@ class TreeGraphDynamic(BaseGraph):
                     self.aux.signature_map[node.index] = self._compute_signature(node.embedding)
                 current_layer_signatures.append((self.aux.signature_map[node.index], node.index))
         logger.info("len of current layer signatures: {length}".format(length=len(current_layer_signatures)))
+        end_time4 = time.time()
+        logger.info(f"✅Layer {layer} signature_update completed in {end_time4 - start_time4:.2f} seconds")
 
 
         # If reach top layer
@@ -528,14 +553,14 @@ class TreeGraphDynamic(BaseGraph):
                 self._graph.add_layer()
                 await self._create_node_without_embedding(layer+1, "", {node.index for node in current_layer_nodes})
 
-        # sort the signatures by signature
+        # Sort the signatures by signature
         current_layer_signatures.sort(key=lambda x: x[0])
 
-        # display the signatures
+        # Display the signatures
         if layer != 0:
             logger.info("current layer signatures: {signatures}".format(signatures=current_layer_signatures))
 
-        # need to index in the list of signatures
+        # Need to index in the list of signatures
         next_layer = self._graph.get_layer(layer + 1)
         parent_idx = next_layer[0].index
         assert parent_idx != None, "First parent is None"
@@ -543,7 +568,7 @@ class TreeGraphDynamic(BaseGraph):
         # New insertion complete, ready for clustering
         record_parent_idx = []
         for idx, (signature, node_index) in enumerate(current_layer_signatures):
-            # record the parent index, even if the parent is None
+            # Record the parent index, even if the parent is None
             record_parent_idx.append(self.aux.NodeAux[node_index].parent)
             if self.aux.NodeAux[node_index].parent is not None:
                 parent_idx = self.aux.NodeAux[node_index].parent
@@ -553,28 +578,31 @@ class TreeGraphDynamic(BaseGraph):
             self._graph.nodes[parent_idx].children.add(node_index)
             self.aux.affected_entities.add(parent_idx)
         
-        # 输出父亲list
+        # Print the parent index
         logger.info("record_parent_idx: {record_parent_idx}".format(record_parent_idx=record_parent_idx))
+        
+        end_time5 = time.time()
+        logger.info(f"Layer {layer} refinement completed in {end_time5 - start_time1:.2f} seconds")
 
     def _reorder_node_id(self):
         new_node_id = 0
         new_order_map = {}
         
-        # 首先创建映射，只包含有效的节点
+        # Construct the new order map
         for node in self._graph.nodes:
             if node.embedding is not None:
                 new_order_map[node.index] = new_node_id
                 new_node_id = new_node_id + 1
     
-        # 然后只处理有效的节点
+        # Compile the valid nodes
         new_all_nodes = []
         for node in self._graph.nodes:
-            if node.index in new_order_map:  # 检查节点是否在映射中
+            if node.index in new_order_map:
                 node.index = new_order_map[node.index]
                 if node.children is not None:
                     new_children = set()
                     for child in node.children:
-                        if child in new_order_map:  # 检查子节点是否在映射中
+                        if child in new_order_map:
                             new_children.add(new_order_map[child])
                     node.children = new_children
                 new_all_nodes.append(node)
@@ -629,13 +657,13 @@ class TreeGraphDynamic(BaseGraph):
             start_id += 1
 
     async def _build_graph(self, chunks: List[Any]):
-        if not self.config.force:  # 只在非force模式下尝试加载
+        if not self.config.force: 
             is_load = await self._graph.load_tree_graph_from_leaves()
             if is_load:
                 logger.info(f"Loaded {len(self._graph.leaf_nodes)} Leaf Embeddings")
                 await self._build_tree_from_leaves()
                 return
-        # 如果force=True或者加载失败，则重新构建
+        # Rebuild the graph if force is True or load failed
         self._graph.clear()  # clear the storage before rebuilding
         self._graph.add_layer()
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:

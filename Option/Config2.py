@@ -13,11 +13,6 @@ from Core.Utils.YamlModel import YamlModel
 
 class WorkingParams(BaseModel):
     """Working parameters"""
-
-    # working_dir: str = "/ssddata/zhengjun/GraphRAG-master/Dataset_tests"
-    # exp_name: str = "multi-1"
-    # data_root: str = "/ssddata/zhengjun/GraphRAG-master/Data"
-    # dataset_name: str = "multi-1"
     working_dir: str = ""
     exp_name: str = ""
     data_root: str = ""
@@ -132,9 +127,6 @@ def parse(opt_path):
     
         with open(opt_path, mode='r') as f:
             opt = YamlModel.read_yaml(opt_path)
-        # export CUDA_VISIBLE_DEVICES
-        # gpu_list = ','.join(str(x) for x in opt['gpu_ids'])
-        # os.environ['CUDA_VISIBLE_DEVICES'] = gpu_list
         return opt
 def merge_dict(dicts: Iterable[Dict]) -> Dict:
     """Merge multiple dicts into one, with the latter dict overwriting the former"""
@@ -144,4 +136,4 @@ def merge_dict(dicts: Iterable[Dict]) -> Dict:
     return result
 
 
-default_config = Config.default() # which is used in other files, only for LLM, embedding and save file. 
+default_config = Config.default() 

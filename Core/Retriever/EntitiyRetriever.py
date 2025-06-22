@@ -37,16 +37,44 @@ class EntityRetriever(BaseRetriever):
         try:
             if top_k is None:
                 top_k = self.config.top_k
+                
+            # Custom search logic
+            if self.config.custom_search and tree_node:
+                return await self._custom_tree_search(seed, top_k)
+            
+            # Original logic
             node_datas = await self.entities_vdb.retrieval_nodes(query=seed, top_k=top_k, graph=self.graph,
                                                                  tree_node=tree_node)
 
             if not len(node_datas):
                 return None
-            if not all([n is not None for n in node_datas]):
-                logger.warning("Some nodes are missing, maybe the storage is damaged")
+                
+            valid_node_datas = []
+            max_node_id = len(self.graph._graph.nodes) - 1
+            for node in node_datas:
+                if node is None:
+                    continue
+                if tree_node:
+                    if 0 <= node.index <= max_node_id:
+                        valid_node_datas.append(node)
+                    else:
+                        logger.warning(f"Invalid node index {node.index} found in vector index, max valid index is {max_node_id}")
+                else:
+                    entity_name = node.get("entity_name")
+                    if entity_name and await self.graph.has_node(entity_name):
+                        valid_node_datas.append(node)
+                    else:
+                        logger.warning(f"Invalid entity {entity_name} found in vector index")
+            
+            if not valid_node_datas:
+                logger.warning("No valid nodes found after filtering")
+                return None
+                
+            node_datas = valid_node_datas
             if tree_node:
                 node_datas = [node.text for node in node_datas]
                 return node_datas
+                
             node_degrees = await asyncio.gather(
                 *[self.graph.node_degree(node["entity_name"]) for node in node_datas]
             )
@@ -59,6 +87,64 @@ class EntityRetriever(BaseRetriever):
             return node_datas
         except Exception as e:
             logger.exception(f"Failed to find relevant entities_vdb: {e}")
+
+    async def _custom_tree_search(self, seed, top_k):
+        """
+        Custom search that retrieves a portion from leaf nodes and the rest from non-leaf nodes
+        """
+        try:
+            # Get all nodes from the tree
+            all_nodes = await self.entities_vdb.retrieval_nodes(query=seed, top_k=self.graph.num_nodes, graph=self.graph, tree_node=True)
+            
+            if not all_nodes:
+                return None
+                
+            # Separate leaf nodes and non-leaf nodes
+            leaf_nodes = []
+            non_leaf_nodes = []
+            
+            # Get leaf nodes from tree structure
+            leaf_node_indices = set()
+            if hasattr(self.graph, 'tree') and self.graph.tree and hasattr(self.graph.tree, 'leaf_nodes'):
+                # Get indices of leaf nodes (layer 0)
+                for leaf_node in self.graph.tree.leaf_nodes:
+                    if hasattr(leaf_node, 'index'):
+                        leaf_node_indices.add(leaf_node.index)
+            
+            for node in all_nodes:
+                if node is None:
+                    continue
+                    
+                # Check if node is a leaf node
+                if hasattr(node, 'index') and node.index in leaf_node_indices:
+                    leaf_nodes.append(node)
+                else:
+                    non_leaf_nodes.append(node)
+            
+            # Calculate how many nodes to retrieve from each type
+            leaf_count = int(top_k * self.config.portion)
+            non_leaf_count = top_k - leaf_count
+            
+            # Ensure we don't exceed available nodes
+            leaf_count = min(leaf_count, len(leaf_nodes))
+            non_leaf_count = min(non_leaf_count, len(non_leaf_nodes))
+            
+            # Combine results
+            result_nodes = []
+            result_nodes.extend(leaf_nodes[:leaf_count])
+            result_nodes.extend(non_leaf_nodes[:non_leaf_count])
+            
+            # Extract text from nodes
+            node_texts = [node.text for node in result_nodes if hasattr(node, 'text')]
+            
+            logger.info(f"Custom search: retrieved {len(leaf_nodes[:leaf_count])} leaf nodes and {len(non_leaf_nodes[:non_leaf_count])} non-leaf nodes")
+            
+            return node_texts
+            
+        except Exception as e:
+            logger.exception(f"Failed in custom tree search: {e}")
+            # Fallback to original method
+            return await self.entities_vdb.retrieval_nodes(query=seed, top_k=top_k, graph=self.graph, tree_node=True)
 
     @register_retriever_method(type="entity", method_name="tf_df")
     async def _find_relevant_entities_tf_df(self, seed, corpus, top_k, candidates_idx):

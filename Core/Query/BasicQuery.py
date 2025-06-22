@@ -17,7 +17,7 @@ class BasicQuery(BaseQuery):
                                                                    mode="vdb")
 
         entities_context, relations_context, text_units_context, communities_context = None, None, None, None
-        if self.config.use_global_query and self.config.use_community_info:
+        if self.config.use_global_query and self.config.use_community:
             return await self._retrieve_relevant_contexts_global(query)
         if self.config.use_keywords and self.config.use_global_query:
             entities_context, relations_context, text_units_context = await self._retrieve_relevant_contexts_global_keywords(
@@ -29,8 +29,8 @@ class BasicQuery(BaseQuery):
             hl_entities_context, hl_relations_context, hl_text_units_context = await self._retrieve_relevant_contexts_global_keywords(
                 query)
             entities_context, relations_context, text_units_context = combine_contexts(
-                entities=[entities_context, hl_entities_context], relations=[relations_context, hl_relations_context],
-                text_units=[text_units_context, hl_text_units_context], sources=[communities_context])
+                entities=[entities_context, hl_entities_context], relationships=[relations_context, hl_relations_context],
+                sources=[text_units_context, hl_text_units_context])
         results = f"""
             -----Entities-----
             ```csv
@@ -65,7 +65,7 @@ class BasicQuery(BaseQuery):
 
         node_datas = await self._retriever.retrieve_relevant_content(seed=query, type=Retriever.ENTITY, mode="vdb")
 
-        if self.config.use_community_info:
+        if self.config.use_communiy_info:
             use_communities = await self._retriever.retrieve_relevant_content(seed=node_datas, type=Retriever.COMMUNITY,
                                                                               mode="from_entity")
         use_relations = await self._retriever.retrieve_relevant_content(seed=node_datas, type=Retriever.RELATION,
@@ -211,11 +211,27 @@ class BasicQuery(BaseQuery):
     async def generation_qa(self, query, context):
         if context is None:
             return QueryPrompt.FAIL_RESPONSE
-
         if self.config.tree_search:
             instruction = f"Given Context: {context} Give the best full answer amongst the option to question {query}"
             response = await self.llm.aask(msg=instruction)
             return response
+        if self.config.community_information and self.config.use_global_query:
+            sys_prompt_temp = QueryPrompt.GLOBAL_REDUCE_RAG_RESPONSE
+        elif not self.config.community_information and self.config.use_keywords:
+            sys_prompt_temp = QueryPrompt.RAG_RESPONSE
+        elif self.config.community_information and not self.config.use_keywords and self.config.enable_local:
+            sys_prompt_temp = QueryPrompt.LOCAL_RAG_RESPONSE
+        else:
+            logger.error("Invalid query configuration")
+            return QueryPrompt.FAIL_RESPONSE
+        response = await self.llm.aask(
+            query,
+            system_msgs=[sys_prompt_temp.format(
+                report_data=context, response_type=self.config.response_type
+            )],
+        )
+        return response
+  
 
     async def generation_summary(self, query, context):
 

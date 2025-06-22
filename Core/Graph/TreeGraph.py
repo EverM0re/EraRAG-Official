@@ -261,7 +261,15 @@ class TreeGraph(BaseGraph):
     async def _batch_embed_and_assign(self, layer):
         current_layer = self._graph.get_layer(layer)
         texts = [node.text for node in current_layer]
-        embeddings = self.embedding_model._get_text_embeddings(texts)
+        # For openai embedding model 
+        embeddings = []
+        batch_size = self.embedding_model.embed_batch_size
+        
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            batch_embeddings = self.embedding_model._get_text_embeddings(batch)
+            embeddings.extend(batch_embeddings)
+        # embeddings = self.embedding_model._get_text_embeddings(texts)
         start_id = self._graph.get_node_num() - len(self._graph.get_layer(layer))
         for i in range(start_id, len(self._graph.nodes)):
             self._graph.nodes[i].id = i

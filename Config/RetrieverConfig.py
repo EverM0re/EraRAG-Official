@@ -17,3 +17,7 @@ class RetrieverConfig(YamlModel):
     local_max_token_for_text_unit: int = 4000
     use_relations_vdb: bool = False
     use_subgraphs_vdb: bool = False
+    
+    # Custom search parameters
+    custom_search: bool = False  # Enable custom search mode
+    portion: float = 0.6  # Portion of leaf nodes to retrieve (0.0-1.0)
