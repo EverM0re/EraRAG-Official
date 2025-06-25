@@ -91,26 +91,93 @@ class EntityRetriever(BaseRetriever):
     async def _custom_tree_search(self, seed, top_k):
         """
         Custom search that retrieves a portion from leaf nodes and the rest from non-leaf nodes
+        Supports both TreeGraphLSH and TreeGraphDynamic
         """
         try:
+            # Get node count safely with multiple fallback strategies
+            node_count = None
+            
+            # Strategy 1: Direct access to num_nodes
+            if hasattr(self.graph, 'num_nodes'):
+                node_count = self.graph.num_nodes
+                logger.debug(f"Got node count from graph.num_nodes: {node_count}")
+            
+            # Strategy 2: Access through _graph attribute (for TreeGraphLSH and TreeGraphDynamic)
+            elif hasattr(self.graph, '_graph') and hasattr(self.graph._graph, 'num_nodes'):
+                node_count = self.graph._graph.num_nodes
+                logger.debug(f"Got node count from graph._graph.num_nodes: {node_count}")
+            
+            # Strategy 3: Use get_node_num method
+            elif hasattr(self.graph, 'get_node_num'):
+                try:
+                    node_count = self.graph.get_node_num()
+                    logger.debug(f"Got node count from graph.get_node_num(): {node_count}")
+                except Exception as e:
+                    logger.warning(f"Failed to get node count from get_node_num(): {e}")
+            
+            # Strategy 4: Try to get from tree property
+            elif hasattr(self.graph, 'tree') and hasattr(self.graph.tree, 'num_nodes'):
+                node_count = self.graph.tree.num_nodes
+                logger.debug(f"Got node count from graph.tree.num_nodes: {node_count}")
+            
+            # Fallback: use a reasonable default
+            if node_count is None:
+                node_count = 1000
+                logger.warning("Could not determine node count, using default value of 1000")
+            else:
+                logger.info(f"Using node count: {node_count}")
+            
             # Get all nodes from the tree
-            all_nodes = await self.entities_vdb.retrieval_nodes(query=seed, top_k=self.graph.num_nodes, graph=self.graph, tree_node=True)
+            all_nodes = await self.entities_vdb.retrieval_nodes(query=seed, top_k=node_count, graph=self.graph, tree_node=True)
             
             if not all_nodes:
+                logger.warning("No nodes retrieved from vector database")
                 return None
+                
+            logger.info(f"Retrieved {len(all_nodes)} nodes from vector database")
                 
             # Separate leaf nodes and non-leaf nodes
             leaf_nodes = []
             non_leaf_nodes = []
             
-            # Get leaf nodes from tree structure
+            # Get leaf nodes from tree structure - support multiple graph types
             leaf_node_indices = set()
+            
+            # Try different ways to get leaf nodes
             if hasattr(self.graph, 'tree') and self.graph.tree and hasattr(self.graph.tree, 'leaf_nodes'):
-                # Get indices of leaf nodes (layer 0)
+                # Standard tree structure
                 for leaf_node in self.graph.tree.leaf_nodes:
                     if hasattr(leaf_node, 'index'):
                         leaf_node_indices.add(leaf_node.index)
+                logger.debug(f"Found {len(leaf_node_indices)} leaf node indices from tree.leaf_nodes")
             
+            elif hasattr(self.graph, '_graph') and hasattr(self.graph._graph, 'tree') and hasattr(self.graph._graph.tree, 'leaf_nodes'):
+                # TreeGraphLSH/TreeGraphDynamic structure
+                for leaf_node in self.graph._graph.tree.leaf_nodes:
+                    if hasattr(leaf_node, 'index'):
+                        leaf_node_indices.add(leaf_node.index)
+                logger.debug(f"Found {len(leaf_node_indices)} leaf node indices from _graph.tree.leaf_nodes")
+            
+            elif hasattr(self.graph, '_graph') and hasattr(self.graph._graph, 'leaf_nodes'):
+                # Direct access to leaf_nodes
+                for leaf_node in self.graph._graph.leaf_nodes:
+                    if hasattr(leaf_node, 'index'):
+                        leaf_node_indices.add(leaf_node.index)
+                logger.debug(f"Found {len(leaf_node_indices)} leaf node indices from _graph.leaf_nodes")
+            
+            # Alternative: identify leaf nodes by checking if they have no children
+            if not leaf_node_indices:
+                logger.info("No leaf nodes found through tree structure, trying to identify by children")
+                for node in all_nodes:
+                    if node is None:
+                        continue
+                    # Check if node has no children (leaf node)
+                    if hasattr(node, 'children') and (node.children is None or len(node.children) == 0):
+                        if hasattr(node, 'index'):
+                            leaf_node_indices.add(node.index)
+                logger.debug(f"Identified {len(leaf_node_indices)} leaf nodes by checking children")
+            
+            # Classify nodes
             for node in all_nodes:
                 if node is None:
                     continue
@@ -120,6 +187,8 @@ class EntityRetriever(BaseRetriever):
                     leaf_nodes.append(node)
                 else:
                     non_leaf_nodes.append(node)
+            
+            logger.info(f"Classified nodes: {len(leaf_nodes)} leaf nodes, {len(non_leaf_nodes)} non-leaf nodes")
             
             # Calculate how many nodes to retrieve from each type
             leaf_count = int(top_k * self.config.portion)
@@ -144,6 +213,7 @@ class EntityRetriever(BaseRetriever):
         except Exception as e:
             logger.exception(f"Failed in custom tree search: {e}")
             # Fallback to original method
+            logger.info("Falling back to original retrieval method")
             return await self.entities_vdb.retrieval_nodes(query=seed, top_k=top_k, graph=self.graph, tree_node=True)
 
     @register_retriever_method(type="entity", method_name="tf_df")

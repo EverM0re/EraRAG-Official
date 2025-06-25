@@ -5,18 +5,20 @@ llm:
   api_key: "Your API Key"
 
 
+
 embedding:
   api_type: "hf"  # or  ollama / etc.
   api_key: "Your API Key"
   model: "Your EmbeddingModel"
   cache_dir: "Your Cache Directory"
+
   dimensions: 1024 # Matches your chunking model dimension
   max_token_size: 8102
   embed_batch_size: 128
   embedding_func_max_async: 16
 
 
-data_root: Your Data Root Directory
+data_root: Your Data Root
 working_dir: Your Working Directory
 exp_name: Your Experiment Name
 external_tree_path: Your External Tree Path
