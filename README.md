@@ -7,7 +7,7 @@
 
 <h5 align="center">
 
-<img src="figures/main.png">
+<img src="figures/main1.png">
 
 </h5>
 
