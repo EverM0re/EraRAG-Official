@@ -27,7 +27,7 @@ EraRAG is a novel hierarchical graph construction framework that supports dynami
 
 ## 🚀 Get Start
 
-EraRAG and controled baselines are built on the unified framework proposed by [In-depth study of graphrag](https://github.com/JayLZhou/GraphRAG). To run EraRAG, use the following command:
+EraRAG and controled baselines are built on the unified framework proposed by [In-depth study of graphrag](https://github.com/JayLZhou/GraphRAG). Requirements.txt is included to help get you started. To run EraRAG, use the following command:
 ```
 python main.py -opt <Method>.yaml -dataset_name <Datasetname> -external_tree <External tree path> -root <rootname> -query <wether to query>
 ```
