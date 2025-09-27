@@ -7,11 +7,6 @@
 
 </h5>
 
-This is the official implementation of the following paper: 
-> **EraRAG: Efficient and Incremental Retrieval-Augmented Generation for Growing Corpora** [[Paper](https://arxiv.org/abs/2506.20963)]
-> 
-> Fangyuan Zhang, Zhengjun Huang, Yingli Zhou, Qintian Guo, Zhixun Li, Wensheng Luo, Di Jiang, Yixiang Fang, Xiaofang Zhou
-
 EraRAG is a novel hierarchical graph construction framework that supports dynamic updates through localized selective re-partitioning, enabling efficient and scalable retrieval with strong static accuracy and stable performance under corpus changes.
 
 ## 💫 Key Features
