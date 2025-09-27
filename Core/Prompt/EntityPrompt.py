@@ -380,7 +380,7 @@ Entities can be any noun phrases or concepts that represent distinct entities
 in the context of the given content.
 
 Node Extraction:
-For each identified entity, you should create a Node object.
+For each entity, you should create a Node object.
 Each Node object should have a unique identifier (id) and a type (type).
 Additional properties associated with the node can also be extracted and 
 stored.

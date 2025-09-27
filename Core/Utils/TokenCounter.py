@@ -80,7 +80,6 @@ TOKEN_COSTS = {
     "google/gemini-pro-1.5": {"prompt": 0.0025, "completion": 0.0075},  # for openrouter, end
     "deepseek-chat": {"prompt": 0.00014, "completion": 0.00028},
     "deepseek-coder": {"prompt": 0.00014, "completion": 0.00028},
-    # For ark model https://www.volcengine.com/docs/82379/1099320
     "doubao-lite-4k-240515": {"prompt": 0.000043, "completion": 0.000086},
     "doubao-lite-32k-240515": {"prompt": 0.000043, "completion": 0.000086},
     "doubao-lite-128k-240515": {"prompt": 0.00011, "completion": 0.00014},

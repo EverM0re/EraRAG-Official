@@ -55,7 +55,6 @@ class Config(WorkingParams, YamlModel):
 
     # ColBert Option
     use_colbert: bool = True
-    colbert_checkpoint_path: str = "/home/yingli/HippoRAG/exp/colbertv2.0"
     index_name: str = "nbits_2"
     similarity_max: float = 1.0
     # Graph Augmentation

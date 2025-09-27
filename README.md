@@ -1,7 +1,3 @@
-
-
-
-
 <h1 align="center"> 💫 EraRAG: Efficient and Incremental Retrieval-Augmented Generation for Growing Corpora </a></h2>
 <h5 align="center"> If you like our project, please give us a star ⭐ on GitHub for the latest update.</h5>
 
@@ -79,14 +75,3 @@ Thanks to the proposed selective reconstruction mechanism, EraRAG is able to per
 
 We acknowledge these excellent works for providing open-source code: [GraphRAG](https://github.com/microsoft/graphrag), [RAPTOR](https://github.com/parthsarthi03/raptor), [LightRAG](https://github.com/HKUDS/LightRAG), [HippoRAG](https://github.com/OSU-NLP-Group/HippoRAG), [In-depth study of graphrag](https://github.com/JayLZhou/GraphRAG).
 
-
-## 🤗 Citation
-Please consider citing our work if you find it helpful:
-```
-@article{zhang2025erarag,
-      title={EraRAG: Efficient and Incremental Retrieval Augmented Generation for Growing Corpora}, 
-      author={Fangyuan Zhang and Zhengjun Huang and Yingli Zhou and Qintian Guo and Zhixun Li and Wensheng Luo and Di Jiang and Yixiang Fang and Xiaofang Zhou},
-      journal={arXiv preprint arXiv:2506.20963},
-      year={2025} 
-}
-```
